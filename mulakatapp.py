@@ -1,0 +1,149 @@
+%%writefile app.py
+import streamlit as st
+import google.generativeai as genai
+from pypdf import PdfReader
+import time
+
+# --- Sayfa Ayarları ---
+st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
+st.title("🤖 AI Mülakat Simülasyonu (Advanced Mode)")
+
+# --- Sidebar ---
+with st.sidebar:
+    st.header("⚙️ Ayarlar")
+    api_key = st.text_input("Google API Key", type="password")
+    
+    # Model Seçimi
+    model_options = ["Önce API Key Girin"]
+    if api_key:
+        try:
+            genai.configure(api_key=api_key)
+            options = []
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    options.append(m.name)
+            if options: model_options = options
+        except: pass
+
+    index = 0
+    for i, name in enumerate(model_options):
+        if "flash" in name: index = i; break
+    selected_model = st.selectbox("Model Seçimi", model_options, index=index)
+
+    with st.form("main_form"):
+        st.info("Mülakat Detayları")
+        job_description = st.text_area("İş İlanı (JD)", height=100)
+        cv_file = st.file_uploader("CV (Zorunlu)", type="pdf")
+        portfolio_files = st.file_uploader("Ek Dosyalar", type="pdf", accept_multiple_files=True)
+        start_interview = st.form_submit_button("Mülakatı Başlat")
+    
+    st.markdown("---")
+    if st.session_state.get('chat_session'):
+        if st.button("🏁 Mülakatı Bitir ve Puanla", type="primary"):
+            st.session_state['finish_requested'] = True
+
+# --- Fonksiyonlar ---
+def get_pdf_text(pdf_file):
+    text = ""
+    try:
+        reader = PdfReader(pdf_file)
+        for page in reader.pages: text += page.extract_text()
+    except: pass
+    return text
+
+if "messages" not in st.session_state: st.session_state.messages = [] 
+if "chat_session" not in st.session_state: st.session_state.chat_session = None 
+if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
+
+# --- Mülakatı Başlat ---
+if start_interview:
+    if not api_key or not cv_file:
+        st.error("Eksik bilgi.")
+    else:
+        genai.configure(api_key=api_key)
+        cv_text = get_pdf_text(cv_file)
+        portfolio_text = ""
+        if portfolio_files:
+            for file in portfolio_files:
+                portfolio_text += f"\n--- DOSYA: {file.name} ---\n{get_pdf_text(file)}\n"
+        
+        try:
+            # --- İŞTE SİHİR BURADA: GELİŞMİŞ SİSTEM PROMPTU ---
+            system_prompt = f"""
+            ROLÜN: Sen, detaylara takıntılı, "Senior" seviyesinde bir Teknik İşe Alım Yöneticisisin.
+            
+            VERİLER:
+            - İŞ İLANI: {job_description}
+            - CV: {cv_text}
+            - PORTFOLYO: {portfolio_text}
+            
+            MÜLAKAT STRATEJİN (Bunu harfiyen uygula):
+            1. AŞAMALI ZORLUK: İlk soru ısınma olsun. Aday doğru bildikçe, soruları "Nasıl?" ve "Neden?" diye derinleştirerek zorlaştır.
+            2. DEDEKTİF MODU: Aday "Yaptım, ettim" gibi genel konuşursa KABUL ETME. Hemen "Hangi teknolojiyle?", "Hangi parametreleri kullandın?", "Alternatifleri neden eledin?" diye sor.
+            3. STAR TEKNİĞİ: Adaydan her zaman Somut Olay (Situation) ve Sonuç (Result) iste. Teorik tanımları kabul etme.
+            4. TUZAK KUR: Arada sırada "Bu işlemi X ile yaptığını söyledin ama Y kullansan daha iyi olmaz mıydı?" gibi (bazen hatalı önermelerle) adayın bilgisini ve özgüvenini sına.
+            
+            KURALLAR:
+            - Asla uzun nutuklar atma. Soru sor ve sus.
+            - Tek seferde SADECE BİR soru sor.
+            - Adayın kopyala-yapıştır cevap verdiğini hissedersen "Bunu kendi cümlelerinle, yaşadığın bir örnekle anlat" de.
+            
+            Şimdi, profesyonel ama sorgulayıcı bir tonla kendini tanıt ve CV/Portfolyodaki en dikkat çekici (veya şüpheli) noktadan ilk sorunu sor.
+            """
+            
+            model = genai.GenerativeModel(selected_model)
+            chat = model.start_chat(history=[])
+            st.session_state.chat_session = chat
+            
+            chat.send_message(system_prompt)
+            response = chat.send_message("Mülakatı başlat.")
+            
+            st.session_state.messages = [{"role": "assistant", "content": response.text}]
+            st.session_state.finish_requested = False
+            st.success(f"✅ Zorlu Mod Aktif! Model: {selected_model}")
+            
+        except Exception as e:
+            st.error(f"Hata: {e}")
+
+# --- Raporlama (Aynı Kalıyor) ---
+if st.session_state.finish_requested and st.session_state.chat_session:
+    with st.spinner("Analiz ediliyor..."):
+        try:
+            report_prompt = """
+            MÜLAKAT BİTTİ. Şimdi "Senior Lead" şapkanı tak ve acımasız bir rapor hazırla.
+            Adayın teknik derinliğini, hatalarını ve potansiyelini analiz et.
+            
+            Çıktı Formatı:
+            1. SKOR: (0-100)
+            2. KARAR: (Net Olumlu/Olumsuz)
+            3. TESPİT EDİLEN RİSKLER: (Teknik eksikler, yüzeysel cevaplar)
+            4. GÜÇLÜ KASLAR: (Adayın parladığı yerler)
+            5. SENİOR TAVSİYESİ: (Bir abi/abla tavsiyesi gibi)
+            """
+            response = st.session_state.chat_session.send_message(report_prompt)
+            st.session_state.messages.append({"role": "assistant", "content": response.text})
+            st.session_state.finish_requested = False
+        except: pass
+
+# --- Ekran ---
+if st.session_state.chat_session:
+    for message in st.session_state.messages:
+        role = "user" if message["role"] == "user" else "assistant"
+        if role == "assistant" and "SKOR:" in message["content"]:
+            with st.chat_message(role, avatar="📝"):
+                st.info(message["content"])
+        else:
+            with st.chat_message(role):
+                st.write(message["content"])
+
+    if user_input := st.chat_input("Cevabın..."):
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"): st.write(user_input)
+
+        with st.spinner("Analiz ediyor..."):
+            try:
+                time.sleep(1)
+                response = st.session_state.chat_session.send_message(user_input)
+                st.session_state.messages.append({"role": "assistant", "content": response.text})
+                with st.chat_message("assistant"): st.write(response.text)
+            except: pass
