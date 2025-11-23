@@ -1,4 +1,3 @@
-%%writefile app.py
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
@@ -146,4 +145,5 @@ if st.session_state.chat_session:
                 response = st.session_state.chat_session.send_message(user_input)
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
                 with st.chat_message("assistant"): st.write(response.text)
+
             except: pass
