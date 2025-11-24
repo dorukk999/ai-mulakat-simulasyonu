@@ -13,7 +13,7 @@ st.title("🤖 AI Mülakat Simülasyonu (Final + PDF Rapor)")
 
 # --- 1. FONKSİYONLAR: Font İndirme ve PDF Oluşturma ---
 def check_and_download_fonts():
-    # Türkçe karakter sorunu yaşamamak için Roboto fontunu indiriyoruz
+    # Fontları indirmeyi dene ama hata verirse programı durdurma
     fonts = {
         "Roboto-Regular.ttf": "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Regular.ttf",
         "Roboto-Bold.ttf": "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Bold.ttf"
@@ -21,7 +21,7 @@ def check_and_download_fonts():
     for font_name, url in fonts.items():
         if not os.path.exists(font_name):
             try:
-                response = requests.get(url)
+                response = requests.get(url, timeout=5) # 5 sn zaman aşımı
                 if response.status_code == 200:
                     with open(font_name, 'wb') as f:
                         f.write(response.content)
@@ -30,53 +30,73 @@ def check_and_download_fonts():
 def create_pdf_report(data):
     check_and_download_fonts()
     
+    # Font kontrolü: Dosyalar gerçekten indi mi?
+    use_font = 'Arial' # Varsayılan (Garanti)
+    if os.path.exists('Roboto-Bold.ttf') and os.path.exists('Roboto-Regular.ttf'):
+        use_font = 'Roboto'
+
     class PDF(FPDF):
         def header(self):
-            if os.path.exists('Roboto-Bold.ttf'):
-                self.add_font('Roboto', 'B', 'Roboto-Bold.ttf', uni=True)
-                self.add_font('Roboto', '', 'Roboto-Regular.ttf', uni=True)
-                self.set_font('Roboto', 'B', 20)
-            else:
-                self.set_font('Arial', 'B', 20)
+            # Eğer Roboto varsa ekle, yoksa Arial devam et
+            if use_font == 'Roboto':
+                try:
+                    self.add_font('Roboto', 'B', 'Roboto-Bold.ttf', uni=True)
+                    self.add_font('Roboto', '', 'Roboto-Regular.ttf', uni=True)
+                except: pass # Ekleme hatası olursa Arial kalır
             
+            self.set_font(use_font, 'B', 20)
             self.cell(0, 10, 'AI MULAKAT SONUC RAPORU', 0, 1, 'C')
             self.ln(10)
 
         def chapter_title(self, title):
-            self.set_font('Roboto', 'B', 14)
+            self.set_font(use_font, 'B', 14)
             self.set_fill_color(230, 230, 230)
             self.cell(0, 10, title, 0, 1, 'L', fill=True)
             self.ln(4)
 
         def chapter_body(self, body):
-            self.set_font('Roboto', '', 11)
+            self.set_font(use_font, '', 11)
             self.multi_cell(0, 6, body)
             self.ln(5)
 
     pdf = PDF()
+    # Fontları ana nesneye de eklememiz lazım (Header dışında kullanım için)
+    if use_font == 'Roboto':
+        try:
+            pdf.add_font('Roboto', 'B', 'Roboto-Bold.ttf', uni=True)
+            pdf.add_font('Roboto', '', 'Roboto-Regular.ttf', uni=True)
+        except: pass
+
     pdf.add_page()
     
     # 1. Genel Puan ve Karar
-    pdf.set_font('Roboto', 'B', 16)
+    pdf.set_font(use_font, 'B', 16)
     pdf.cell(0, 10, f"GENEL PUAN: {data['score']}/100", 0, 1, 'C')
-    pdf.set_text_color(0, 100, 0) if "Olumlu" in data['decision'] else pdf.set_text_color(200, 0, 0)
+    
+    # Renk ayarı
+    if "Olumlu" in data['decision']:
+        pdf.set_text_color(0, 100, 0) 
+    else:
+        pdf.set_text_color(200, 0, 0)
+        
     pdf.cell(0, 10, f"KARAR: {data['decision']}", 0, 1, 'C')
     pdf.set_text_color(0, 0, 0)
     pdf.ln(10)
     
     # 2. Yetkinlik Tablosu
     pdf.chapter_title("YETKINLIK PUANLARI")
-    pdf.set_font('Roboto', '', 12)
+    pdf.set_font(use_font, '', 12)
     for cat, val in zip(data['categories'], data['values']):
         pdf.cell(100, 8, f"- {cat}", 0, 0)
-        pdf.set_font('Roboto', 'B', 12)
+        pdf.set_font(use_font, 'B', 12)
         pdf.cell(0, 8, f"{val}/100", 0, 1)
-        pdf.set_font('Roboto', '', 12)
+        pdf.set_font(use_font, '', 12)
     pdf.ln(10)
     
     # 3. Yorumlar
     pdf.chapter_title("YAPAY ZEKA DEGERLENDIRMESI")
-    # Emoji temizliği
+    # Türkçe karakter temizliği (Arial moduna düşerse bozulmasın diye)
+    # Latin-1 encoding hatasını önlemek için safe string yapıyoruz
     text_content = data['text'].encode('latin-1', 'ignore').decode('latin-1')
     pdf.chapter_body(text_content)
     
@@ -87,7 +107,7 @@ with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    # Model Seçimi (Filtreli)
+    # Model Seçimi
     model_options = ["Önce API Key Girin"]
     if api_key:
         try:
@@ -192,9 +212,8 @@ if st.session_state.chat_session:
 
 # --- Raporlama ---
 if st.session_state.finish_requested and st.session_state.chat_session:
-    with st.spinner("Analiz ve PDF hazırlanıyor..."):
+    with st.spinner("Grafikler hazırlanıyor..."):
         try:
-            # Üçlü tırnakların düzgün kapatıldığından emin olduğumuz kısım
             report_prompt = """
             MÜLAKAT BİTTİ. Detaylı analiz yap.
             FORMAT:
@@ -207,9 +226,8 @@ if st.session_state.finish_requested and st.session_state.chat_session:
             TEORİK_BİLGİ: (0-100)
             POTANSİYEL: (0-100)
             -- SÖZEL RAPOR --
-            (Detaylı bir değerlendirme yazısı)
+            (Kısa bir özet yaz)
             """
-            
             response = st.session_state.chat_session.send_message(report_prompt)
             full_text = response.text
             
@@ -241,7 +259,7 @@ if st.session_state.finish_requested and st.session_state.chat_session:
 
         except Exception as e: st.error(f"Hata: {e}")
 
-# --- EKRAN: Rapor ve PDF İndirme ---
+# --- EKRAN: Rapor ve PDF ---
 if st.session_state.report_data:
     data = st.session_state.report_data
     
@@ -266,12 +284,15 @@ if st.session_state.report_data:
     with col_text:
         st.info(data['text'])
         
-        # PDF İndirme Butonu
+        # PDF Butonu
         st.markdown("### 📥 Raporu İndir")
-        pdf_bytes = create_pdf_report(data)
-        st.download_button(
-            label="📄 Raporu PDF Olarak İndir",
-            data=bytes(pdf_bytes),
-            file_name="mulakat_karnesi.pdf",
-            mime="application/pdf"
-        )
+        try:
+            pdf_bytes = create_pdf_report(data)
+            st.download_button(
+                label="📄 Raporu PDF Olarak İndir",
+                data=bytes(pdf_bytes),
+                file_name="mulakat_karnesi.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.error(f"PDF oluşturulamadı: {e}")
