@@ -2,11 +2,11 @@ import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
 import time
-import plotly.graph_objects as go # Grafik kütüphanesi
+import plotly.graph_objects as go
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
-st.title("🤖 AI Mülakat Simülasyonu (Final + Grafikli)")
+st.title("🤖 AI Mülakat Simülasyonu (Final Versiyon)")
 
 # --- Sidebar ---
 with st.sidebar:
@@ -90,7 +90,7 @@ if start_interview:
                 portfolio_text += f"\n--- DOSYA: {file.name} ---\n{get_pdf_text(file)}\n"
                 
         try:
-            # SİSTEM PROMPTU
+            # SİSTEM PROMPTU (EVRENSEL)
             system_prompt = f"""
             GÖREVİN:
             Sen, aşağıda verilen İŞ İLANI için en uygun "İşe Alım Yöneticisi" kimliğine bürüneceksin.
@@ -101,7 +101,7 @@ if start_interview:
             - ADAY DOSYALARI: {portfolio_text}
             
             MÜLAKAT STRATEJİN:
-            1. ROLÜ BENİMSE: İlana göre uygun role gir.
+            1. ROLÜ BENİMSE: İlana göre (Öğretmen, Mühendis, Satışçı) uygun role gir.
             2. ZORLA: Adayın deneyimlerini didik didik et.
             3. SENARYO SOR: Anlık kriz durumları sor.
             
@@ -131,7 +131,7 @@ if start_interview:
 
 # --- Raporlama ve Görselleştirme ---
 if st.session_state.finish_requested and st.session_state.chat_session:
-    with st.spinner("Grafikler oluşturuluyor..."):
+    with st.spinner("Analiz ediliyor..."):
         try:
             report_prompt = """
             MÜLAKAT BİTTİ. Adayı analiz et.
@@ -189,10 +189,7 @@ if st.session_state.finish_requested and st.session_state.chat_session:
             c1, c2 = st.columns([1, 1])
             with c1:
                 st.subheader("Yetkinlik Radarı")
-                # Radar Grafiği 
-
-[Image of radar chart competency visualization]
-
+                # Radar Grafiği Oluşturma
                 fig = go.Figure(data=go.Scatterpolar(
                     r=values, 
                     theta=categories, 
