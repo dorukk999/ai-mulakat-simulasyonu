@@ -1,4 +1,0 @@
-ffmpeg
-flac
-portaudio19-dev
-libasound2-dev
