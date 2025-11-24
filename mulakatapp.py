@@ -2,17 +2,20 @@ import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
 import time
+import plotly.graph_objects as go # Grafik için
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
-st.title("🤖 AI Mülakat Simülasyonu (Advanced Mode)")
+st.title("🤖 AI Mülakat Simülasyonu (Final + Güvenlik Ayarlı)")
 
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Ayarlar")
+    
+    # 1. API Key
     api_key = st.text_input("Google API Key", type="password")
     
-    # Model Seçimi
+    # 2. Model Seçimi
     model_options = ["Önce API Key Girin"]
     if api_key:
         try:
@@ -21,24 +24,32 @@ with st.sidebar:
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
                     options.append(m.name)
-            if options: model_options = options
-        except: pass
+            if options:
+                model_options = options
+        except:
+            st.error("API Key geçersiz.")
 
+    # 1.5 Flash Modelini Otomatik Seç (En stabili budur)
     index = 0
     for i, name in enumerate(model_options):
-        if "flash" in name: index = i; break
+        if "1.5" in name and "flash" in name: # 1.5 Flash'ı zorluyoruz
+            index = i
+            break
+            
     selected_model = st.selectbox("Model Seçimi", model_options, index=index)
 
+    # 3. Form
     with st.form("main_form"):
         st.info("Mülakat Detayları")
         job_description = st.text_area("İş İlanı (JD)", height=100)
         cv_file = st.file_uploader("CV (Zorunlu)", type="pdf")
         portfolio_files = st.file_uploader("Ek Dosyalar", type="pdf", accept_multiple_files=True)
+        
         start_interview = st.form_submit_button("Mülakatı Başlat")
     
     st.markdown("---")
     if st.session_state.get('chat_session'):
-        if st.button("🏁 Mülakatı Bitir ve Puanla", type="primary"):
+        if st.button("🏁 Mülakatı Bitir ve Raporla", type="primary"):
             st.session_state['finish_requested'] = True
 
 # --- Fonksiyonlar ---
@@ -46,18 +57,41 @@ def get_pdf_text(pdf_file):
     text = ""
     try:
         reader = PdfReader(pdf_file)
-        for page in reader.pages: text += page.extract_text()
+        for page in reader.pages:
+            text += page.extract_text()
     except: pass
     return text
 
+# --- Hafıza ---
 if "messages" not in st.session_state: st.session_state.messages = [] 
 if "chat_session" not in st.session_state: st.session_state.chat_session = None 
 if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
 
-# --- Mülakatı Başlat ---
+# --- GÜVENLİK AYARLARI (SORUNU ÇÖZEN KISIM) ---
+# Botun sert konuşmasına izin veriyoruz
+safety_settings = [
+    {
+        "category": "HARM_CATEGORY_HARASSMENT",
+        "threshold": "BLOCK_NONE"
+    },
+    {
+        "category": "HARM_CATEGORY_HATE_SPEECH",
+        "threshold": "BLOCK_NONE"
+    },
+    {
+        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        "threshold": "BLOCK_NONE"
+    },
+    {
+        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+        "threshold": "BLOCK_NONE"
+    },
+]
+
+# --- Mülakatı Başlatma ---
 if start_interview:
-    if not api_key or not cv_file:
-        st.error("Eksik bilgi.")
+    if not api_key or not cv_file or selected_model == "Önce API Key Girin":
+        st.error("Lütfen eksik bilgileri doldurun.")
     else:
         genai.configure(api_key=api_key)
         cv_text = get_pdf_text(cv_file)
@@ -65,148 +99,134 @@ if start_interview:
         if portfolio_files:
             for file in portfolio_files:
                 portfolio_text += f"\n--- DOSYA: {file.name} ---\n{get_pdf_text(file)}\n"
-        
+                
         try:
-            # --- İŞTE SİHİR BURADA: GELİŞMİŞ SİSTEM PROMPTU ---
+            # SİSTEM PROMPTU (EVRENSEL MOD)
             system_prompt = f"""
-            ROLÜN: Sen, detaylara takıntılı, "Senior" seviyesinde bir Teknik İşe Alım Yöneticisisin.
+            GÖREVİN:
+            Sen, aşağıda verilen İŞ İLANI için en uygun "İşe Alım Yöneticisi" kimliğine bürüneceksin.
             
             VERİLER:
-            - İŞ İLANI: {job_description}
-            - CV: {cv_text}
-            - PORTFOLYO: {portfolio_text}
+            - İŞ İLANI (JD): {job_description}
+            - ADAY CV: {cv_text}
+            - ADAY DOSYALARI: {portfolio_text}
             
-            MÜLAKAT STRATEJİN (Bunu harfiyen uygula):
-            1. AŞAMALI ZORLUK: İlk soru ısınma olsun. Aday doğru bildikçe, soruları "Nasıl?" ve "Neden?" diye derinleştirerek zorlaştır.
-            2. DEDEKTİF MODU: Aday "Yaptım, ettim" gibi genel konuşursa KABUL ETME. Hemen "Hangi teknolojiyle?", "Hangi parametreleri kullandın?", "Alternatifleri neden eledin?" diye sor.
-            3. STAR TEKNİĞİ: Adaydan her zaman Somut Olay (Situation) ve Sonuç (Result) iste. Teorik tanımları kabul etme.
-            4. TUZAK KUR: Arada sırada "Bu işlemi X ile yaptığını söyledin ama Y kullansan daha iyi olmaz mıydı?" gibi (bazen hatalı önermelerle) adayın bilgisini ve özgüvenini sına.
+            MÜLAKAT STRATEJİN:
+            1. ROLÜ BENİMSE: İlana göre (Öğretmen, Mühendis, Satışçı) uygun role gir.
+            2. ZORLA: Adayın deneyimlerini didik didik et. "Nasıl yaptın?", "Neden?" diye sor.
+            3. SENARYO SOR: "Sınıfta kavga çıktı ne yaparsın?" veya "Server çöktü ne yaparsın?" gibi anlık durumlar sor.
             
             KURALLAR:
-            - Asla uzun nutuklar atma. Soru sor ve sus.
             - Tek seferde SADECE BİR soru sor.
-            - Adayın kopyala-yapıştır cevap verdiğini hissedersen "Bunu kendi cümlelerinle, yaşadığın bir örnekle anlat" de.
+            - Profesyonel ve sorgulayıcı ol.
             
-            Şimdi, profesyonel ama sorgulayıcı bir tonla kendini tanıt ve CV/Portfolyodaki en dikkat çekici (veya şüpheli) noktadan ilk sorunu sor.
+            Rolünü belirterek mülakatı başlat.
             """
             
-            model = genai.GenerativeModel(selected_model)
+            # Modeli Güvenlik Ayarlarıyla Başlatıyoruz
+            model = genai.GenerativeModel(
+                model_name=selected_model,
+                safety_settings=safety_settings 
+            )
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
             
+            # Promptu gönder
             chat.send_message(system_prompt)
             response = chat.send_message("Mülakatı başlat.")
             
             st.session_state.messages = [{"role": "assistant", "content": response.text}]
-            st.session_state.finish_requested = False
-            st.success(f"✅ Zorlu Mod Aktif! Model: {selected_model}")
+            st.session_state.finish_requested = False 
+            st.success(f"✅ Mülakat Başladı! Model: {selected_model}")
             
         except Exception as e:
             st.error(f"Hata: {e}")
 
-
-
-
-# --- GÜNCELLENMİŞ GÖRSEL RAPORLAMA KISMI ---
+# --- Raporlama ve Grafik ---
 if st.session_state.finish_requested and st.session_state.chat_session:
-    with st.spinner("Yapay zeka verileri analiz edip grafikleri çiziyor..."):
+    with st.spinner("Analiz ediliyor..."):
         try:
-            # 1. AI'dan YAPISAL VERİ İSTİYORUZ (JSON Formatına Yakın)
             report_prompt = """
-            MÜLAKAT BİTTİ. Adayı analiz et ve aşağıdaki formatta rapor ver.
-            
-            ÖNEMLİ: Her satırın başına belirleyici etiket koy ki onları ayrıştırabileyim.
+            MÜLAKAT BİTTİ. Adayı analiz et.
             
             FORMAT:
-            SKOR: (0-100 arası sadece sayı)
+            SKOR: (0-100 arası sayı)
             KARAR: (Olumlu / Olumsuz)
             
-            -- PUAN DETAYLARI (0-100 arası puan ver) --
-            TEKNİK: (Puan)
-            İLETİŞİM: (Puan)
-            PROBLEM_ÇÖZME: (Puan)
-            TEORİK_BİLGİ: (Puan)
-            POTANSİYEL: (Puan)
+            -- PUAN DETAYLARI --
+            TEKNİK: (0-100)
+            İLETİŞİM: (0-100)
+            PROBLEM_ÇÖZME: (0-100)
+            TEORİK_BİLGİ: (0-100)
+            POTANSİYEL: (0-100)
             
             -- SÖZEL RAPOR --
-            GÜÇLÜ: (Maddeler halinde)
-            ZAYIF: (Maddeler halinde)
+            GÜÇLÜ: (Maddeler)
+            ZAYIF: (Maddeler)
             TAVSİYE: (Kısa tavsiye)
             """
             response = st.session_state.chat_session.send_message(report_prompt)
             full_text = response.text
             
-            # 2. METNİ AYRIŞTIRMA (PARSING)
-            # AI'ın verdiği metinden sayıları çekiyoruz
-            try:
-                score = int(full_text.split("SKOR:")[1].split("\n")[0].strip())
+            # Parsing (Veri Çekme)
+            try: score = int(full_text.split("SKOR:")[1].split("\n")[0].strip())
             except: score = 0
-            
-            try:
-                decision = full_text.split("KARAR:")[1].split("\n")[0].strip()
+            try: decision = full_text.split("KARAR:")[1].split("\n")[0].strip()
             except: decision = "Belirsiz"
 
-            # Detay Puanlarını Çekmeye Çalışalım
             categories = ["TEKNİK", "İLETİŞİM", "PROBLEM_ÇÖZME", "TEORİK_BİLGİ", "POTANSİYEL"]
             values = []
             for cat in categories:
-                try:
-                    val = int(full_text.split(f"{cat}:")[1].split("\n")[0].strip())
-                except: val = 50 # Okuyamazsa ortalama ver
+                try: val = int(full_text.split(f"{cat}:")[1].split("\n")[0].strip())
+                except: val = 50 
                 values.append(val)
             
-            # Sözlü Raporu Ayıklama
-            try:
-                verbal_report = full_text.split("-- SÖZEL RAPOR --")[1]
+            try: verbal_report = full_text.split("-- SÖZEL RAPOR --")[1]
             except: verbal_report = full_text
 
-            st.session_state.finish_requested = False # Döngüyü kır
+            st.session_state.finish_requested = False
             
-            # --- 3. GÖRSELLEŞTİRME EKRANI (DASHBOARD) ---
+            # Görselleştirme
             st.markdown("---")
-            st.header("📊 Mülakat Sonuç Karnesi")
-            
-            # Üst Kısım: Büyük Puan ve Karar
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Genel Başarı Puanı", f"{score}/100")
-            
-            if "Olumlu" in decision:
-                col2.success(f"Karar: {decision}")
-            else:
-                col2.error(f"Karar: {decision}")
+            st.header("📊 Sonuç Karnesi")
+            col1, col2 = st.columns(2)
+            col1.metric("Genel Puan", f"{score}/100")
+            if "Olumlu" in decision: col2.success(f"Karar: {decision}")
+            else: col2.error(f"Karar: {decision}")
                 
-            # Progress Bar (Puan Çubuğu)
             st.progress(score)
             
-            # Orta Kısım: Radar Grafiği ve Yorumlar
             c1, c2 = st.columns([1, 1])
-            
             with c1:
-                st.subheader("Yetkinlik Dağılımı")
-                # Radar Grafiği Oluşturma
-                fig = go.Figure(data=go.Scatterpolar(
-                    r=values,
-                    theta=categories,
-                    fill='toself',
-                    name='Aday Profili'
-                ))
-                fig.update_layout(
-                    polar=dict(
-                        radialaxis=dict(
-                            visible=True,
-                            range=[0, 100]
-                        )),
-                    showlegend=False
-                )
+                st.subheader("Yetkinlik Radarı")
+                fig = go.Figure(data=go.Scatterpolar(r=values, theta=categories, fill='toself', name='Aday'))
+                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
-            
             with c2:
-                st.subheader("📝 Yapay Zeka Yorumu")
+                st.subheader("Yorum")
                 st.info(verbal_report)
                 
-            # Mesaja da ekle ki kaybolmasın
-            st.session_state.messages.append({"role": "assistant", "content": f"**Rapor Oluşturuldu:**\nPuan: {score}\nKarar: {decision}"})
+            st.session_state.messages.append({"role": "assistant", "content": f"**Rapor:** Puan {score} - {decision}"})
 
         except Exception as e:
-            st.error(f"Grafik oluşturulurken hata: {e}")
-            st.write(response.text) # Hata olursa düz metni bas
+            st.error(f"Hata: {e}")
+
+# --- Ekran ---
+if st.session_state.chat_session:
+    for message in st.session_state.messages:
+        role = "user" if message["role"] == "user" else "assistant"
+        if role == "assistant" and "SKOR:" in message["content"]: continue # Rapor metnini tekrar basma
+        with st.chat_message(role):
+            st.write(message["content"])
+
+    if user_input := st.chat_input("Cevabın..."):
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"): st.write(user_input)
+
+        with st.spinner("..."):
+            try:
+                time.sleep(1)
+                response = st.session_state.chat_session.send_message(user_input)
+                st.session_state.messages.append({"role": "assistant", "content": response.text})
+                with st.chat_message("assistant"): st.write(response.text)
+            except: pass
