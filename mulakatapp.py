@@ -244,8 +244,18 @@ if st.session_state.chat_session:
 if st.session_state.finish_requested and st.session_state.chat_session:
     with st.spinner("Grafikler hazırlanıyor..."):
         try:
+            # --- GÜNCELLENMİŞ VE SERT RAPORLAMA PROMPTU ---
             report_prompt = """
-            MÜLAKAT BİTTİ. Detaylı analiz yap.
+            MÜLAKAT BİTTİ. Şimdi adayın performansını değerlendir.
+            
+            🚨 ÇOK ÖNEMLİ KURALLAR (BUNLARA UYMAZSAN CEZA ALIRSIN):
+            1. Sadece CV'ye bakarak puan verme! Adayın SOHBETTE verdiği cevapları baz al.
+            2. EĞER ADAY SORULARA "...", "Hıhı", "Bilmem", "Cevap yok" GİBİ GEÇİŞTİRME CEVAPLARI VERDİYSE:
+               - GENEL PUANI DİREKT "0 ile 20" ARASINDA VER.
+               - Kararı "OLUMSUZ" yap.
+               - Yorum kısmına "Aday mülakatı ciddiye almadı" yaz.
+            3. CV'si mükemmel olsa bile, mülakatta konuşmayan aday KALIR.
+            
             FORMAT:
             SKOR: (0-100)
             KARAR: (Olumlu / Olumsuz)
@@ -256,7 +266,7 @@ if st.session_state.finish_requested and st.session_state.chat_session:
             TEORİK_BİLGİ: (0-100)
             POTANSİYEL: (0-100)
             -- SÖZEL RAPOR --
-            (Kısa bir özet yaz)
+            (Buraya aday ciddiyetsizse sert bir eleştiri, iyiyse detaylı analiz yaz)
             """
             response = st.session_state.chat_session.send_message(report_prompt)
             full_text = response.text
@@ -324,3 +334,4 @@ if st.session_state.report_data:
             )
         except Exception as e:
             st.error(f"PDF oluşturulamadı: {e}")
+
