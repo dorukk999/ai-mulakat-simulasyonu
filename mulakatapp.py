@@ -6,14 +6,14 @@ import plotly.graph_objects as go
 from fpdf import FPDF
 import os
 import requests
+import tempfile # Geçici dosya oluşturmak için
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
 st.title("🤖 AI Mülakat Simülasyonu (Final + PDF Rapor)")
 
-# --- 1. FONKSİYONLAR: Font İndirme ve PDF Oluşturma ---
+# --- 1. FONKSİYONLAR ---
 def check_and_download_fonts():
-    # Fontları indirmeyi dene ama hata verirse programı durdurma
     fonts = {
         "Roboto-Regular.ttf": "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Regular.ttf",
         "Roboto-Bold.ttf": "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Bold.ttf"
@@ -21,7 +21,7 @@ def check_and_download_fonts():
     for font_name, url in fonts.items():
         if not os.path.exists(font_name):
             try:
-                response = requests.get(url, timeout=5) # 5 sn zaman aşımı
+                response = requests.get(url, timeout=5)
                 if response.status_code == 200:
                     with open(font_name, 'wb') as f:
                         f.write(response.content)
@@ -30,19 +30,18 @@ def check_and_download_fonts():
 def create_pdf_report(data):
     check_and_download_fonts()
     
-    # Font kontrolü: Dosyalar gerçekten indi mi?
-    use_font = 'Arial' # Varsayılan (Garanti)
+    # Font kontrolü
+    use_font = 'Arial' 
     if os.path.exists('Roboto-Bold.ttf') and os.path.exists('Roboto-Regular.ttf'):
         use_font = 'Roboto'
 
     class PDF(FPDF):
         def header(self):
-            # Eğer Roboto varsa ekle, yoksa Arial devam et
             if use_font == 'Roboto':
                 try:
                     self.add_font('Roboto', 'B', 'Roboto-Bold.ttf', uni=True)
                     self.add_font('Roboto', '', 'Roboto-Regular.ttf', uni=True)
-                except: pass # Ekleme hatası olursa Arial kalır
+                except: pass
             
             self.set_font(use_font, 'B', 20)
             self.cell(0, 10, 'AI MULAKAT SONUC RAPORU', 0, 1, 'C')
@@ -60,7 +59,8 @@ def create_pdf_report(data):
             self.ln(5)
 
     pdf = PDF()
-    # Fontları ana nesneye de eklememiz lazım (Header dışında kullanım için)
+    
+    # Fontları ana nesneye ekle
     if use_font == 'Roboto':
         try:
             pdf.add_font('Roboto', 'B', 'Roboto-Bold.ttf', uni=True)
@@ -69,11 +69,10 @@ def create_pdf_report(data):
 
     pdf.add_page()
     
-    # 1. Genel Puan ve Karar
+    # 1. Genel Puan
     pdf.set_font(use_font, 'B', 16)
     pdf.cell(0, 10, f"GENEL PUAN: {data['score']}/100", 0, 1, 'C')
     
-    # Renk ayarı
     if "Olumlu" in data['decision']:
         pdf.set_text_color(0, 100, 0) 
     else:
@@ -83,7 +82,7 @@ def create_pdf_report(data):
     pdf.set_text_color(0, 0, 0)
     pdf.ln(10)
     
-    # 2. Yetkinlik Tablosu
+    # 2. Tablo
     pdf.chapter_title("YETKINLIK PUANLARI")
     pdf.set_font(use_font, '', 12)
     for cat, val in zip(data['categories'], data['values']):
@@ -95,19 +94,24 @@ def create_pdf_report(data):
     
     # 3. Yorumlar
     pdf.chapter_title("YAPAY ZEKA DEGERLENDIRMESI")
-    # Türkçe karakter temizliği (Arial moduna düşerse bozulmasın diye)
-    # Latin-1 encoding hatasını önlemek için safe string yapıyoruz
-    text_content = data['text'].encode('latin-1', 'ignore').decode('latin-1')
-    pdf.chapter_body(text_content)
+    # Artık encode/decode ile harf silmeye gerek yok, direkt basıyoruz
+    pdf.chapter_body(data['text'])
     
-    return pdf.output(dest='S').encode('latin-1')
+    # --- DÜZELTİLEN KISIM: GEÇİCİ DOSYA YÖNTEMİ ---
+    # String olarak değil, dosya olarak kaydedip byte okuyoruz.
+    # Bu yöntem Unicode hatası vermez.
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        pdf.output(tmp_file.name)
+        tmp_file.seek(0) # Başa dön
+        pdf_bytes = tmp_file.read() # Byte olarak oku
+        
+    return pdf_bytes
 
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    # Model Seçimi
     model_options = ["Önce API Key Girin"]
     if api_key:
         try:
@@ -231,7 +235,6 @@ if st.session_state.finish_requested and st.session_state.chat_session:
             response = st.session_state.chat_session.send_message(report_prompt)
             full_text = response.text
             
-            # Veri Ayıklama
             try: score = int(full_text.split("SKOR:")[1].split("\n")[0].strip())
             except: score = 0
             try: decision = full_text.split("KARAR:")[1].split("\n")[0].strip()
@@ -284,13 +287,13 @@ if st.session_state.report_data:
     with col_text:
         st.info(data['text'])
         
-        # PDF Butonu
         st.markdown("### 📥 Raporu İndir")
         try:
+            # PDF Oluşturma (Artık hata vermeyecek)
             pdf_bytes = create_pdf_report(data)
             st.download_button(
                 label="📄 Raporu PDF Olarak İndir",
-                data=bytes(pdf_bytes),
+                data=pdf_bytes, # bytes dönüşümü fonksiyon içinde yapıldı
                 file_name="mulakat_karnesi.pdf",
                 mime="application/pdf"
             )
