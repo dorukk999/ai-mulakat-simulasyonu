@@ -7,13 +7,10 @@ from fpdf import FPDF
 import os
 import requests
 import tempfile
-from audio_recorder_streamlit import audio_recorder # Mikrofon için
-import speech_recognition as sr # Sesi yazıya çevirmek için
-from gTTS import gTTS # Yazıyı sese çevirmek için
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
-st.title("🤖 AI Mülakat Simülasyonu (Sesli & Yazılı)")
+st.title("🤖 AI Mülakat Simülasyonu")
 
 # --- 1. FONKSİYONLAR ---
 def check_and_download_fonts():
@@ -36,23 +33,31 @@ def tr_to_en(text):
     for tr, en in tr_map.items(): text = text.replace(tr, en)
     return text
 
-# SES İŞLEME FONKSİYONLARI (YENİ)
-def speech_to_text(audio_bytes):
-    r = sr.Recognizer()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
-        tmp_audio.write(audio_bytes)
-        tmp_path = tmp_audio.name
-    
+# --- SES FONKSİYONLARI (GÜVENLİ IMPORT) ---
+def get_audio_recorder():
+    # Kütüphane yoksa hata vermek yerine None döndürür
     try:
+        from audio_recorder_streamlit import audio_recorder
+        return audio_recorder
+    except ImportError: return None
+
+def speech_to_text(audio_bytes):
+    try:
+        import speech_recognition as sr
+        r = sr.Recognizer()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
+            tmp_audio.write(audio_bytes)
+            tmp_path = tmp_audio.name
         with sr.AudioFile(tmp_path) as source:
             audio_data = r.record(source)
             text = r.recognize_google(audio_data, language="tr-TR")
-            return text
-    except: return None
-    finally: os.remove(tmp_path)
+        os.remove(tmp_path)
+        return text
+    except Exception as e: return None
 
 def text_to_speech(text):
     try:
+        from gTTS import gTTS
         tts = gTTS(text=text, lang='tr')
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_mp3:
             tts.save(tmp_mp3.name)
@@ -219,59 +224,55 @@ if st.session_state.chat_session:
         role = "user" if message["role"] == "user" else "assistant"
         with st.chat_message(role):
             st.write(message["content"])
-            # Eğer bu mesaj asistana aitse ve yeni geldiyse seslendir (Opsiyonel)
-            # Burada sadece son mesajı seslendirmek istersek logic eklenebilir
 
-    # Girdi Yöntemi Seçimi (Ses veya Yazı)
-    col_mic, col_text = st.columns([1, 4])
+    # --- HİBRİT GİRDİ ALANI (SES + YAZI) ---
+    col_mic, col_text = st.columns([1, 5])
     
-    with col_mic:
-        # Ses Kaydedici
-        audio_bytes = audio_recorder(
-            text="",
-            recording_color="#e8b62c",
-            neutral_color="#6aa36f",
-            icon_name="microphone",
-            icon_size="2x",
-        )
+    audio_bytes = None
+    audio_recorder_func = get_audio_recorder() # Güvenli Çağrı
     
+    if audio_recorder_func:
+        with col_mic:
+            audio_bytes = audio_recorder_func(
+                text="",
+                recording_color="#e8b62c",
+                neutral_color="#6aa36f",
+                icon_name="microphone",
+                icon_size="2x",
+            )
+    else:
+        with col_mic:
+            st.warning("⚠️ Ses modülü yüklenemedi")
+
     user_input = None
-    
-    # 1. Ses Geldi mi?
     if audio_bytes:
-        with st.spinner("Ses yazıya çevriliyor..."):
-            text_from_speech = speech_to_text(audio_bytes)
-            if text_from_speech:
-                user_input = text_from_speech
-                st.info(f"🎤 Algılanan: {user_input}")
-            else:
-                st.warning("Ses anlaşılamadı, tekrar deneyin.")
+        with st.spinner("Ses işleniyor..."):
+            user_input = speech_to_text(audio_bytes)
+            if user_input: st.info(f"🎤 {user_input}")
+    
+    # Yazı girişi her zaman aktif
+    text_input = st.chat_input("Cevabın...")
+    if text_input: user_input = text_input
 
-    # 2. Yazı Geldi mi? (Chat Input her zaman aktif)
-    if not user_input:
-        user_input = st.chat_input("Cevabın...")
-
-    # --- İşlem ---
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
-        if not audio_bytes: # Ses değilse ekrana bas (Ses zaten yukarıda info olarak basıldı)
+        if text_input: # Ses değilse ekrana bas
             with st.chat_message("user"): st.write(user_input)
 
-        with st.spinner("Yapay zeka düşünüyor..."):
+        with st.spinner("..."):
             try:
-                # Yapay Zeka Cevabı
-                response = st.session_state.chat_session.send_message(user_input)
-                ai_text = response.text
-                st.session_state.messages.append({"role": "assistant", "content": ai_text})
-                
-                with st.chat_message("assistant"):
-                    st.write(ai_text)
+                # Eğer son mesaj asistana aitse tekrar sorma (Çift cevap önleme)
+                if st.session_state.messages[-1]["role"] != "assistant":
+                    response = st.session_state.chat_session.send_message(user_input)
+                    ai_text = response.text
+                    st.session_state.messages.append({"role": "assistant", "content": ai_text})
                     
-                    # SESLENDİRME (AUTO-PLAY)
-                    audio_path = text_to_speech(ai_text)
-                    if audio_path:
-                        st.audio(audio_path, format="audio/mp3", autoplay=True)
-                        
+                    with st.chat_message("assistant"):
+                        st.write(ai_text)
+                        # Seslendirme
+                        audio_path = text_to_speech(ai_text)
+                        if audio_path:
+                            st.audio(audio_path, format="audio/mp3", autoplay=True)
             except Exception as e: st.error(f"Hata: {e}")
 
 # --- Raporlama ---
