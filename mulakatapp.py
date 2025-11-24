@@ -28,18 +28,16 @@ def check_and_download_fonts():
             except: pass
 
 def create_pdf_report(data):
-    # Fontları kontrol et
     check_and_download_fonts()
     
     class PDF(FPDF):
         def header(self):
-            # Font Tanımlama
             if os.path.exists('Roboto-Bold.ttf'):
                 self.add_font('Roboto', 'B', 'Roboto-Bold.ttf', uni=True)
                 self.add_font('Roboto', '', 'Roboto-Regular.ttf', uni=True)
                 self.set_font('Roboto', 'B', 20)
             else:
-                self.set_font('Arial', 'B', 20) # Yedek
+                self.set_font('Arial', 'B', 20)
             
             self.cell(0, 10, 'AI MULAKAT SONUC RAPORU', 0, 1, 'C')
             self.ln(10)
@@ -63,7 +61,7 @@ def create_pdf_report(data):
     pdf.cell(0, 10, f"GENEL PUAN: {data['score']}/100", 0, 1, 'C')
     pdf.set_text_color(0, 100, 0) if "Olumlu" in data['decision'] else pdf.set_text_color(200, 0, 0)
     pdf.cell(0, 10, f"KARAR: {data['decision']}", 0, 1, 'C')
-    pdf.set_text_color(0, 0, 0) # Rengi sıfırla
+    pdf.set_text_color(0, 0, 0)
     pdf.ln(10)
     
     # 2. Yetkinlik Tablosu
@@ -78,15 +76,11 @@ def create_pdf_report(data):
     
     # 3. Yorumlar
     pdf.chapter_title("YAPAY ZEKA DEGERLENDIRMESI")
-    # Emoji temizliği (PDF emojileri sevmez)
-    clean_text = data['text'].encode('latin-1', 'ignore').decode('latin-1') 
-    # Veya basitçe emojileri görmezden gelmek için safe string kullanalım
-    pdf.chapter_body(data['text'])
+    # Emoji temizliği
+    text_content = data['text'].encode('latin-1', 'ignore').decode('latin-1')
+    pdf.chapter_body(text_content)
     
-    pdf.chapter_title("ONERILER")
-    pdf.chapter_body("Bu rapor Yapay Zeka tarafindan otomatik olusturulmustur. Lutfen eksik oldugunuz alanlarda pratik yapmaya devam edin.")
-    
-    return pdf.output(dest='S').encode('latin-1') # Streamlit için binary
+    return pdf.output(dest='S').encode('latin-1')
 
 # --- Sidebar ---
 with st.sidebar:
@@ -200,4 +194,84 @@ if st.session_state.chat_session:
 if st.session_state.finish_requested and st.session_state.chat_session:
     with st.spinner("Analiz ve PDF hazırlanıyor..."):
         try:
+            # Üçlü tırnakların düzgün kapatıldığından emin olduğumuz kısım
             report_prompt = """
+            MÜLAKAT BİTTİ. Detaylı analiz yap.
+            FORMAT:
+            SKOR: (0-100)
+            KARAR: (Olumlu / Olumsuz)
+            -- PUAN DETAYLARI --
+            TEKNİK: (0-100)
+            İLETİŞİM: (0-100)
+            PROBLEM_ÇÖZME: (0-100)
+            TEORİK_BİLGİ: (0-100)
+            POTANSİYEL: (0-100)
+            -- SÖZEL RAPOR --
+            (Detaylı bir değerlendirme yazısı)
+            """
+            
+            response = st.session_state.chat_session.send_message(report_prompt)
+            full_text = response.text
+            
+            # Veri Ayıklama
+            try: score = int(full_text.split("SKOR:")[1].split("\n")[0].strip())
+            except: score = 0
+            try: decision = full_text.split("KARAR:")[1].split("\n")[0].strip()
+            except: decision = "Belirsiz"
+            
+            categories = ["TEKNİK", "İLETİŞİM", "PROBLEM_ÇÖZME", "TEORİK_BİLGİ", "POTANSİYEL"]
+            values = []
+            for cat in categories:
+                try: val = int(full_text.split(f"{cat}:")[1].split("\n")[0].strip())
+                except: val = 50
+                values.append(val)
+            
+            try: verbal_report = full_text.split("-- SÖZEL RAPOR --")[1]
+            except: verbal_report = full_text
+
+            st.session_state.report_data = {
+                "score": score,
+                "decision": decision,
+                "categories": categories,
+                "values": values,
+                "text": verbal_report
+            }
+            st.session_state.finish_requested = False
+            st.rerun()
+
+        except Exception as e: st.error(f"Hata: {e}")
+
+# --- EKRAN: Rapor ve PDF İndirme ---
+if st.session_state.report_data:
+    data = st.session_state.report_data
+    
+    st.markdown("---")
+    st.header("📊 Mülakat Sonuç Karnesi")
+    
+    c1, c2 = st.columns(2)
+    c1.metric("Genel Puan", f"{data['score']}/100")
+    if "Olumlu" in data['decision']: c2.success(f"Karar: {data['decision']}")
+    else: c2.error(f"Karar: {data['decision']}")
+    
+    st.progress(data['score'])
+    
+    col_chart, col_text = st.columns([1, 1])
+    with col_chart:
+        fig = go.Figure(data=go.Scatterpolar(
+            r=data['values'], theta=data['categories'], fill='toself', name='Aday'
+        ))
+        fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col_text:
+        st.info(data['text'])
+        
+        # PDF İndirme Butonu
+        st.markdown("### 📥 Raporu İndir")
+        pdf_bytes = create_pdf_report(data)
+        st.download_button(
+            label="📄 Raporu PDF Olarak İndir",
+            data=bytes(pdf_bytes),
+            file_name="mulakat_karnesi.pdf",
+            mime="application/pdf"
+        )
