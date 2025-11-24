@@ -6,14 +6,16 @@ import plotly.graph_objects as go
 from fpdf import FPDF
 import os
 import requests
-import tempfile # Geçici dosya oluşturmak için
+import tempfile
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
 st.title("🤖 AI Mülakat Simülasyonu (Final + PDF Rapor)")
 
 # --- 1. FONKSİYONLAR ---
+
 def check_and_download_fonts():
+    # Fontları indirmeyi dene
     fonts = {
         "Roboto-Regular.ttf": "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Regular.ttf",
         "Roboto-Bold.ttf": "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Bold.ttf"
@@ -21,17 +23,34 @@ def check_and_download_fonts():
     for font_name, url in fonts.items():
         if not os.path.exists(font_name):
             try:
-                response = requests.get(url, timeout=5)
+                response = requests.get(url, timeout=10) # Süreyi artırdık
                 if response.status_code == 200:
                     with open(font_name, 'wb') as f:
                         f.write(response.content)
             except: pass
 
+# TÜRKÇE KARAKTER DÖNÜŞTÜRÜCÜ (SİGORTA)
+def tr_to_en(text):
+    # Eğer metin yoksa boş dön
+    if not text: return ""
+    # Çeviri tablosu
+    tr_map = {
+        'ğ': 'g', 'Ğ': 'G',
+        'ş': 's', 'Ş': 'S',
+        'ı': 'i', 'İ': 'I',
+        'ç': 'c', 'Ç': 'C',
+        'ü': 'u', 'Ü': 'U',
+        'ö': 'o', 'Ö': 'O'
+    }
+    for tr_char, en_char in tr_map.items():
+        text = text.replace(tr_char, en_char)
+    return text
+
 def create_pdf_report(data):
     check_and_download_fonts()
     
-    # Font kontrolü
-    use_font = 'Arial' 
+    # Hangi fontu kullanacağız?
+    use_font = 'Arial' # Varsayılan (Güvenli Mod)
     if os.path.exists('Roboto-Bold.ttf') and os.path.exists('Roboto-Regular.ttf'):
         use_font = 'Roboto'
 
@@ -50,17 +69,25 @@ def create_pdf_report(data):
         def chapter_title(self, title):
             self.set_font(use_font, 'B', 14)
             self.set_fill_color(230, 230, 230)
-            self.cell(0, 10, title, 0, 1, 'L', fill=True)
+            # Başlıkları da temizle
+            safe_title = title if use_font == 'Roboto' else tr_to_en(title)
+            self.cell(0, 10, safe_title, 0, 1, 'L', fill=True)
             self.ln(4)
 
         def chapter_body(self, body):
             self.set_font(use_font, '', 11)
-            self.multi_cell(0, 6, body)
+            # Eğer Roboto yoksa, Türkçe karakterleri İngilizceye çevir (Çökmemesi için)
+            safe_body = body if use_font == 'Roboto' else tr_to_en(body)
+            
+            # Latin-1 hatasını önlemek için encode/decode
+            if use_font == 'Arial':
+                safe_body = safe_body.encode('latin-1', 'ignore').decode('latin-1')
+                
+            self.multi_cell(0, 6, safe_body)
             self.ln(5)
 
     pdf = PDF()
     
-    # Fontları ana nesneye ekle
     if use_font == 'Roboto':
         try:
             pdf.add_font('Roboto', 'B', 'Roboto-Bold.ttf', uni=True)
@@ -77,8 +104,9 @@ def create_pdf_report(data):
         pdf.set_text_color(0, 100, 0) 
     else:
         pdf.set_text_color(200, 0, 0)
-        
-    pdf.cell(0, 10, f"KARAR: {data['decision']}", 0, 1, 'C')
+    
+    safe_decision = data['decision'] if use_font == 'Roboto' else tr_to_en(data['decision'])
+    pdf.cell(0, 10, f"KARAR: {safe_decision}", 0, 1, 'C')
     pdf.set_text_color(0, 0, 0)
     pdf.ln(10)
     
@@ -86,7 +114,8 @@ def create_pdf_report(data):
     pdf.chapter_title("YETKINLIK PUANLARI")
     pdf.set_font(use_font, '', 12)
     for cat, val in zip(data['categories'], data['values']):
-        pdf.cell(100, 8, f"- {cat}", 0, 0)
+        safe_cat = cat if use_font == 'Roboto' else tr_to_en(cat)
+        pdf.cell(100, 8, f"- {safe_cat}", 0, 0)
         pdf.set_font(use_font, 'B', 12)
         pdf.cell(0, 8, f"{val}/100", 0, 1)
         pdf.set_font(use_font, '', 12)
@@ -94,16 +123,13 @@ def create_pdf_report(data):
     
     # 3. Yorumlar
     pdf.chapter_title("YAPAY ZEKA DEGERLENDIRMESI")
-    # Artık encode/decode ile harf silmeye gerek yok, direkt basıyoruz
     pdf.chapter_body(data['text'])
     
-    # --- DÜZELTİLEN KISIM: GEÇİCİ DOSYA YÖNTEMİ ---
-    # String olarak değil, dosya olarak kaydedip byte okuyoruz.
-    # Bu yöntem Unicode hatası vermez.
+    # Dosya oluşturma
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         pdf.output(tmp_file.name)
-        tmp_file.seek(0) # Başa dön
-        pdf_bytes = tmp_file.read() # Byte olarak oku
+        tmp_file.seek(0)
+        pdf_bytes = tmp_file.read()
         
     return pdf_bytes
 
@@ -289,11 +315,10 @@ if st.session_state.report_data:
         
         st.markdown("### 📥 Raporu İndir")
         try:
-            # PDF Oluşturma (Artık hata vermeyecek)
             pdf_bytes = create_pdf_report(data)
             st.download_button(
                 label="📄 Raporu PDF Olarak İndir",
-                data=pdf_bytes, # bytes dönüşümü fonksiyon içinde yapıldı
+                data=pdf_bytes,
                 file_name="mulakat_karnesi.pdf",
                 mime="application/pdf"
             )
