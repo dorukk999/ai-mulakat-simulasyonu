@@ -3,6 +3,10 @@ google-generativeai
 pypdf
 plotly
 fpdf
+# --- Ses İçin Yeni Eklenenler ---
+audio-recorder-streamlit
+SpeechRecognition
+gTTS
 
 
 
