@@ -7,15 +7,16 @@ from fpdf import FPDF
 import os
 import requests
 import tempfile
+from audio_recorder_streamlit import audio_recorder # Mikrofon için
+import speech_recognition as sr # Sesi yazıya çevirmek için
+from gTTS import gTTS # Yazıyı sese çevirmek için
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
-st.title("🤖 AI Mülakat Simülasyonu (Final + PDF Rapor)")
+st.title("🤖 AI Mülakat Simülasyonu (Sesli & Yazılı)")
 
 # --- 1. FONKSİYONLAR ---
-
 def check_and_download_fonts():
-    # Fontları indirmeyi dene
     fonts = {
         "Roboto-Regular.ttf": "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Regular.ttf",
         "Roboto-Bold.ttf": "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Bold.ttf"
@@ -23,34 +24,44 @@ def check_and_download_fonts():
     for font_name, url in fonts.items():
         if not os.path.exists(font_name):
             try:
-                response = requests.get(url, timeout=10) # Süreyi artırdık
+                response = requests.get(url, timeout=5)
                 if response.status_code == 200:
                     with open(font_name, 'wb') as f:
                         f.write(response.content)
             except: pass
 
-# TÜRKÇE KARAKTER DÖNÜŞTÜRÜCÜ (SİGORTA)
 def tr_to_en(text):
-    # Eğer metin yoksa boş dön
     if not text: return ""
-    # Çeviri tablosu
-    tr_map = {
-        'ğ': 'g', 'Ğ': 'G',
-        'ş': 's', 'Ş': 'S',
-        'ı': 'i', 'İ': 'I',
-        'ç': 'c', 'Ç': 'C',
-        'ü': 'u', 'Ü': 'U',
-        'ö': 'o', 'Ö': 'O'
-    }
-    for tr_char, en_char in tr_map.items():
-        text = text.replace(tr_char, en_char)
+    tr_map = {'ğ':'g','Ğ':'G','ş':'s','Ş':'S','ı':'i','İ':'I','ç':'c','Ç':'C','ü':'u','Ü':'U','ö':'o','Ö':'O'}
+    for tr, en in tr_map.items(): text = text.replace(tr, en)
     return text
+
+# SES İŞLEME FONKSİYONLARI (YENİ)
+def speech_to_text(audio_bytes):
+    r = sr.Recognizer()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
+        tmp_audio.write(audio_bytes)
+        tmp_path = tmp_audio.name
+    
+    try:
+        with sr.AudioFile(tmp_path) as source:
+            audio_data = r.record(source)
+            text = r.recognize_google(audio_data, language="tr-TR")
+            return text
+    except: return None
+    finally: os.remove(tmp_path)
+
+def text_to_speech(text):
+    try:
+        tts = gTTS(text=text, lang='tr')
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_mp3:
+            tts.save(tmp_mp3.name)
+            return tmp_mp3.name
+    except: return None
 
 def create_pdf_report(data):
     check_and_download_fonts()
-    
-    # Hangi fontu kullanacağız?
-    use_font = 'Arial' # Varsayılan (Güvenli Mod)
+    use_font = 'Arial'
     if os.path.exists('Roboto-Bold.ttf') and os.path.exists('Roboto-Regular.ttf'):
         use_font = 'Roboto'
 
@@ -61,56 +72,39 @@ def create_pdf_report(data):
                     self.add_font('Roboto', 'B', 'Roboto-Bold.ttf', uni=True)
                     self.add_font('Roboto', '', 'Roboto-Regular.ttf', uni=True)
                 except: pass
-            
             self.set_font(use_font, 'B', 20)
             self.cell(0, 10, 'AI MULAKAT SONUC RAPORU', 0, 1, 'C')
             self.ln(10)
-
         def chapter_title(self, title):
             self.set_font(use_font, 'B', 14)
             self.set_fill_color(230, 230, 230)
-            # Başlıkları da temizle
             safe_title = title if use_font == 'Roboto' else tr_to_en(title)
             self.cell(0, 10, safe_title, 0, 1, 'L', fill=True)
             self.ln(4)
-
         def chapter_body(self, body):
             self.set_font(use_font, '', 11)
-            # Eğer Roboto yoksa, Türkçe karakterleri İngilizceye çevir (Çökmemesi için)
             safe_body = body if use_font == 'Roboto' else tr_to_en(body)
-            
-            # Latin-1 hatasını önlemek için encode/decode
-            if use_font == 'Arial':
-                safe_body = safe_body.encode('latin-1', 'ignore').decode('latin-1')
-                
+            if use_font == 'Arial': safe_body = safe_body.encode('latin-1', 'ignore').decode('latin-1')
             self.multi_cell(0, 6, safe_body)
             self.ln(5)
 
     pdf = PDF()
-    
     if use_font == 'Roboto':
         try:
             pdf.add_font('Roboto', 'B', 'Roboto-Bold.ttf', uni=True)
             pdf.add_font('Roboto', '', 'Roboto-Regular.ttf', uni=True)
         except: pass
-
     pdf.add_page()
     
-    # 1. Genel Puan
     pdf.set_font(use_font, 'B', 16)
     pdf.cell(0, 10, f"GENEL PUAN: {data['score']}/100", 0, 1, 'C')
-    
-    if "Olumlu" in data['decision']:
-        pdf.set_text_color(0, 100, 0) 
-    else:
-        pdf.set_text_color(200, 0, 0)
-    
+    if "Olumlu" in data['decision']: pdf.set_text_color(0, 100, 0)
+    else: pdf.set_text_color(200, 0, 0)
     safe_decision = data['decision'] if use_font == 'Roboto' else tr_to_en(data['decision'])
     pdf.cell(0, 10, f"KARAR: {safe_decision}", 0, 1, 'C')
     pdf.set_text_color(0, 0, 0)
     pdf.ln(10)
     
-    # 2. Tablo
     pdf.chapter_title("YETKINLIK PUANLARI")
     pdf.set_font(use_font, '', 12)
     for cat, val in zip(data['categories'], data['values']):
@@ -121,16 +115,13 @@ def create_pdf_report(data):
         pdf.set_font(use_font, '', 12)
     pdf.ln(10)
     
-    # 3. Yorumlar
     pdf.chapter_title("YAPAY ZEKA DEGERLENDIRMESI")
     pdf.chapter_body(data['text'])
     
-    # Dosya oluşturma
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         pdf.output(tmp_file.name)
         tmp_file.seek(0)
         pdf_bytes = tmp_file.read()
-        
     return pdf_bytes
 
 # --- Sidebar ---
@@ -228,33 +219,69 @@ if st.session_state.chat_session:
         role = "user" if message["role"] == "user" else "assistant"
         with st.chat_message(role):
             st.write(message["content"])
+            # Eğer bu mesaj asistana aitse ve yeni geldiyse seslendir (Opsiyonel)
+            # Burada sadece son mesajı seslendirmek istersek logic eklenebilir
 
-    if user_input := st.chat_input("Cevabın..."):
+    # Girdi Yöntemi Seçimi (Ses veya Yazı)
+    col_mic, col_text = st.columns([1, 4])
+    
+    with col_mic:
+        # Ses Kaydedici
+        audio_bytes = audio_recorder(
+            text="",
+            recording_color="#e8b62c",
+            neutral_color="#6aa36f",
+            icon_name="microphone",
+            icon_size="2x",
+        )
+    
+    user_input = None
+    
+    # 1. Ses Geldi mi?
+    if audio_bytes:
+        with st.spinner("Ses yazıya çevriliyor..."):
+            text_from_speech = speech_to_text(audio_bytes)
+            if text_from_speech:
+                user_input = text_from_speech
+                st.info(f"🎤 Algılanan: {user_input}")
+            else:
+                st.warning("Ses anlaşılamadı, tekrar deneyin.")
+
+    # 2. Yazı Geldi mi? (Chat Input her zaman aktif)
+    if not user_input:
+        user_input = st.chat_input("Cevabın...")
+
+    # --- İşlem ---
+    if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user"): st.write(user_input)
-        with st.spinner("..."):
+        if not audio_bytes: # Ses değilse ekrana bas (Ses zaten yukarıda info olarak basıldı)
+            with st.chat_message("user"): st.write(user_input)
+
+        with st.spinner("Yapay zeka düşünüyor..."):
             try:
-                time.sleep(1)
+                # Yapay Zeka Cevabı
                 response = st.session_state.chat_session.send_message(user_input)
-                st.session_state.messages.append({"role": "assistant", "content": response.text})
-                with st.chat_message("assistant"): st.write(response.text)
-            except: pass
+                ai_text = response.text
+                st.session_state.messages.append({"role": "assistant", "content": ai_text})
+                
+                with st.chat_message("assistant"):
+                    st.write(ai_text)
+                    
+                    # SESLENDİRME (AUTO-PLAY)
+                    audio_path = text_to_speech(ai_text)
+                    if audio_path:
+                        st.audio(audio_path, format="audio/mp3", autoplay=True)
+                        
+            except Exception as e: st.error(f"Hata: {e}")
 
 # --- Raporlama ---
 if st.session_state.finish_requested and st.session_state.chat_session:
-    with st.spinner("Grafikler hazırlanıyor..."):
+    with st.spinner("Analiz ediliyor..."):
         try:
-            # --- GÜNCELLENMİŞ VE SERT RAPORLAMA PROMPTU ---
             report_prompt = """
-            MÜLAKAT BİTTİ. Şimdi adayın performansını değerlendir.
+            MÜLAKAT BİTTİ. Detaylı analiz yap.
             
-            🚨 ÇOK ÖNEMLİ KURALLAR (BUNLARA UYMAZSAN CEZA ALIRSIN):
-            1. Sadece CV'ye bakarak puan verme! Adayın SOHBETTE verdiği cevapları baz al.
-            2. EĞER ADAY SORULARA "...", "Hıhı", "Bilmem", "Cevap yok" GİBİ GEÇİŞTİRME CEVAPLARI VERDİYSE:
-               - GENEL PUANI DİREKT "0 ile 20" ARASINDA VER.
-               - Kararı "OLUMSUZ" yap.
-               - Yorum kısmına "Aday mülakatı ciddiye almadı" yaz.
-            3. CV'si mükemmel olsa bile, mülakatta konuşmayan aday KALIR.
+            🚨 KURAL: EĞER ADAY CEVAP VERMEDİYSE ("...", "bilmem") PUAN 0 OLSUN.
             
             FORMAT:
             SKOR: (0-100)
@@ -266,7 +293,7 @@ if st.session_state.finish_requested and st.session_state.chat_session:
             TEORİK_BİLGİ: (0-100)
             POTANSİYEL: (0-100)
             -- SÖZEL RAPOR --
-            (Buraya aday ciddiyetsizse sert bir eleştiri, iyiyse detaylı analiz yaz)
+            (Kısa bir özet yaz)
             """
             response = st.session_state.chat_session.send_message(report_prompt)
             full_text = response.text
@@ -334,4 +361,3 @@ if st.session_state.report_data:
             )
         except Exception as e:
             st.error(f"PDF oluşturulamadı: {e}")
-
