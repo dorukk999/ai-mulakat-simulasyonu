@@ -11,9 +11,11 @@ st.title("🤖 AI Mülakat Simülasyonu (Final Versiyon)")
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Ayarlar")
+    
+    # 1. API Key
     api_key = st.text_input("Google API Key", type="password")
     
-    # Model Seçimi (FİLTRELİ)
+    # 2. Model Seçimi (FİLTRELİ)
     model_options = ["Önce API Key Girin"]
     if api_key:
         try:
@@ -39,7 +41,6 @@ with st.sidebar:
         start_interview = st.form_submit_button("Mülakatı Başlat")
     
     st.markdown("---")
-    # Butona basınca sadece tetikleyiciyi çalıştırıyoruz
     if st.session_state.get('chat_session'):
         if st.button("🏁 Mülakatı Bitir ve Raporla", type="primary"):
             st.session_state['finish_requested'] = True
@@ -53,11 +54,10 @@ def get_pdf_text(pdf_file):
     except: pass
     return text
 
-# --- Hafıza Yönetimi ---
+# --- Hafıza ---
 if "messages" not in st.session_state: st.session_state.messages = [] 
 if "chat_session" not in st.session_state: st.session_state.chat_session = None 
 if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
-# Rapor verilerini hafızada tutmak için yeni değişken:
 if "report_data" not in st.session_state: st.session_state.report_data = None 
 
 # --- Güvenlik ---
@@ -73,7 +73,7 @@ if start_interview:
     if not api_key or not cv_file:
         st.error("Eksik bilgi.")
     else:
-        st.session_state.report_data = None # Yeni mülakatta eski raporu sil
+        st.session_state.report_data = None
         genai.configure(api_key=api_key)
         cv_text = get_pdf_text(cv_file)
         portfolio_text = ""
@@ -100,7 +100,7 @@ if start_interview:
             st.success("Başladı!")
         except Exception as e: st.error(f"Hata: {e}")
 
-# --- Sohbet Akışı (ÖNCE BURASI ÇALIŞSIN) ---
+# --- Sohbet Akışı ---
 if st.session_state.chat_session:
     for message in st.session_state.messages:
         role = "user" if message["role"] == "user" else "assistant"
@@ -118,7 +118,7 @@ if st.session_state.chat_session:
                 with st.chat_message("assistant"): st.write(response.text)
             except: pass
 
-# --- Raporlama Mantığı (EN SONA ALDIK) ---
+# --- Raporlama Mantığı ---
 if st.session_state.finish_requested and st.session_state.chat_session:
     with st.spinner("Grafikler hazırlanıyor..."):
         try:
@@ -155,7 +155,7 @@ if st.session_state.finish_requested and st.session_state.chat_session:
             try: verbal_report = full_text.split("-- SÖZEL RAPOR --")[1]
             except: verbal_report = full_text
 
-            # VERİYİ HAFIZAYA KAYDET (Kalıcı Olsun)
+            # Hafızaya Kaydet
             st.session_state.report_data = {
                 "score": score,
                 "decision": decision,
@@ -163,12 +163,12 @@ if st.session_state.finish_requested and st.session_state.chat_session:
                 "values": values,
                 "text": verbal_report
             }
-            st.session_state.finish_requested = False # İsteği kapat
-            st.rerun() # Sayfayı yenile ki aşağıda gözüksün
+            st.session_state.finish_requested = False
+            st.rerun()
 
         except Exception as e: st.error(f"Hata: {e}")
 
-# --- Raporu Ekrana Bas (EN ALTTA) ---
+# --- Raporu Ekrana Bas (DÜZELTİLEN KISIM) ---
 if st.session_state.report_data:
     data = st.session_state.report_data
     
@@ -184,8 +184,12 @@ if st.session_state.report_data:
     
     col_chart, col_text = st.columns([1, 1])
     with col_chart:
-        # Radar Grafiği         fig = go.Figure(data=go.Scatterpolar(
-            r=data['values'], theta=data['categories'], fill='toself', name='Aday'
+        # Radar Grafiği (Parantezler Düzeltildi)
+        fig = go.Figure(data=go.Scatterpolar(
+            r=data['values'], 
+            theta=data['categories'], 
+            fill='toself', 
+            name='Aday'
         ))
         fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
