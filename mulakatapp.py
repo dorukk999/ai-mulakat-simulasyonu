@@ -104,46 +104,109 @@ if start_interview:
         except Exception as e:
             st.error(f"Hata: {e}")
 
-# --- Raporlama (Aynı Kalıyor) ---
+
+
+
+# --- GÜNCELLENMİŞ GÖRSEL RAPORLAMA KISMI ---
 if st.session_state.finish_requested and st.session_state.chat_session:
-    with st.spinner("Analiz ediliyor..."):
+    with st.spinner("Yapay zeka verileri analiz edip grafikleri çiziyor..."):
         try:
+            # 1. AI'dan YAPISAL VERİ İSTİYORUZ (JSON Formatına Yakın)
             report_prompt = """
-            MÜLAKAT BİTTİ. Şimdi "Senior Lead" şapkanı tak ve acımasız bir rapor hazırla.
-            Adayın teknik derinliğini, hatalarını ve potansiyelini analiz et.
+            MÜLAKAT BİTTİ. Adayı analiz et ve aşağıdaki formatta rapor ver.
             
-            Çıktı Formatı:
-            1. SKOR: (0-100)
-            2. KARAR: (Net Olumlu/Olumsuz)
-            3. TESPİT EDİLEN RİSKLER: (Teknik eksikler, yüzeysel cevaplar)
-            4. GÜÇLÜ KASLAR: (Adayın parladığı yerler)
-            5. SENİOR TAVSİYESİ: (Bir abi/abla tavsiyesi gibi)
+            ÖNEMLİ: Her satırın başına belirleyici etiket koy ki onları ayrıştırabileyim.
+            
+            FORMAT:
+            SKOR: (0-100 arası sadece sayı)
+            KARAR: (Olumlu / Olumsuz)
+            
+            -- PUAN DETAYLARI (0-100 arası puan ver) --
+            TEKNİK: (Puan)
+            İLETİŞİM: (Puan)
+            PROBLEM_ÇÖZME: (Puan)
+            TEORİK_BİLGİ: (Puan)
+            POTANSİYEL: (Puan)
+            
+            -- SÖZEL RAPOR --
+            GÜÇLÜ: (Maddeler halinde)
+            ZAYIF: (Maddeler halinde)
+            TAVSİYE: (Kısa tavsiye)
             """
             response = st.session_state.chat_session.send_message(report_prompt)
-            st.session_state.messages.append({"role": "assistant", "content": response.text})
-            st.session_state.finish_requested = False
-        except: pass
-
-# --- Ekran ---
-if st.session_state.chat_session:
-    for message in st.session_state.messages:
-        role = "user" if message["role"] == "user" else "assistant"
-        if role == "assistant" and "SKOR:" in message["content"]:
-            with st.chat_message(role, avatar="📝"):
-                st.info(message["content"])
-        else:
-            with st.chat_message(role):
-                st.write(message["content"])
-
-    if user_input := st.chat_input("Cevabın..."):
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user"): st.write(user_input)
-
-        with st.spinner("Analiz ediyor..."):
+            full_text = response.text
+            
+            # 2. METNİ AYRIŞTIRMA (PARSING)
+            # AI'ın verdiği metinden sayıları çekiyoruz
             try:
-                time.sleep(1)
-                response = st.session_state.chat_session.send_message(user_input)
-                st.session_state.messages.append({"role": "assistant", "content": response.text})
-                with st.chat_message("assistant"): st.write(response.text)
+                score = int(full_text.split("SKOR:")[1].split("\n")[0].strip())
+            except: score = 0
+            
+            try:
+                decision = full_text.split("KARAR:")[1].split("\n")[0].strip()
+            except: decision = "Belirsiz"
 
-            except: pass
+            # Detay Puanlarını Çekmeye Çalışalım
+            categories = ["TEKNİK", "İLETİŞİM", "PROBLEM_ÇÖZME", "TEORİK_BİLGİ", "POTANSİYEL"]
+            values = []
+            for cat in categories:
+                try:
+                    val = int(full_text.split(f"{cat}:")[1].split("\n")[0].strip())
+                except: val = 50 # Okuyamazsa ortalama ver
+                values.append(val)
+            
+            # Sözlü Raporu Ayıklama
+            try:
+                verbal_report = full_text.split("-- SÖZEL RAPOR --")[1]
+            except: verbal_report = full_text
+
+            st.session_state.finish_requested = False # Döngüyü kır
+            
+            # --- 3. GÖRSELLEŞTİRME EKRANI (DASHBOARD) ---
+            st.markdown("---")
+            st.header("📊 Mülakat Sonuç Karnesi")
+            
+            # Üst Kısım: Büyük Puan ve Karar
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Genel Başarı Puanı", f"{score}/100")
+            
+            if "Olumlu" in decision:
+                col2.success(f"Karar: {decision}")
+            else:
+                col2.error(f"Karar: {decision}")
+                
+            # Progress Bar (Puan Çubuğu)
+            st.progress(score)
+            
+            # Orta Kısım: Radar Grafiği ve Yorumlar
+            c1, c2 = st.columns([1, 1])
+            
+            with c1:
+                st.subheader("Yetkinlik Dağılımı")
+                # Radar Grafiği Oluşturma
+                fig = go.Figure(data=go.Scatterpolar(
+                    r=values,
+                    theta=categories,
+                    fill='toself',
+                    name='Aday Profili'
+                ))
+                fig.update_layout(
+                    polar=dict(
+                        radialaxis=dict(
+                            visible=True,
+                            range=[0, 100]
+                        )),
+                    showlegend=False
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with c2:
+                st.subheader("📝 Yapay Zeka Yorumu")
+                st.info(verbal_report)
+                
+            # Mesaja da ekle ki kaybolmasın
+            st.session_state.messages.append({"role": "assistant", "content": f"**Rapor Oluşturuldu:**\nPuan: {score}\nKarar: {decision}"})
+
+        except Exception as e:
+            st.error(f"Grafik oluşturulurken hata: {e}")
+            st.write(response.text) # Hata olursa düz metni bas
