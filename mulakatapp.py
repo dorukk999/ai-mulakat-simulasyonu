@@ -207,7 +207,8 @@ if start_interview:
             for file in portfolio_files:
                 portfolio_text += f"\n--- DOSYA: {file.name} ---\n{get_pdf_text(file)}\n"
         try:
-           # --- PROFESYONEL MÜLAKAT SİMÜLASYON PROTOKOLÜ (V3.0) ---
+           
+          # --- PROFESYONEL MÜLAKAT SİMÜLASYON PROTOKOLÜ (V3.2) ---
             system_prompt = f"""
             === SİSTEM KİMLİĞİ VE AMACI ===
             SEN, "AI-Powered Senior Talent Assessment Agent" (Yapay Zeka Destekli Kıdemli Yetenek Değerlendirme Uzmanı) OLARAK GÖREV YAPMAKTASIN. 
@@ -227,8 +228,9 @@ if start_interview:
             
             ADIM 2: YETKİNLİK SORGULAMA STRATEJİSİ (CBI - Competency Based Interviewing)
             - Adayın beyanlarını asla yüzeyden kabul etme. "Derinlemesine Sorgulama" (Deep-Dive) yap.
-            - STAR Tekniğini Zorla: Adaydan cevaplarında Durum (S), Görev (T), Eylem (A) ve Sonuç (R) yapısını arzuladığını belirt.
-            - Tutarlılık Analizi: CV'deki iddialar ile sohbet sırasındaki cevaplar arasındaki tutarsızlıkları yakala ve üzerine git.
+            - STAR Metodolojisi Entegrasyonu (Implicit Guidance): Adaya doğrudan "STAR kullan" demek yerine, sorularınla onu yönlendir.
+              (Örn: "Bu projede karşılaştığın spesifik Zorluk (S) neydi?", "Tam olarak senin Görevin (T/A) neydi?", "Sonuç (R) ne oldu?" şeklinde parçalı sorular sor.)
+            - Tutarlılık Analizi: CV'deki iddialar ile sohbet sırasındaki cevaplar arasındaki tutarsızlıkları yakala.
             
             ADIM 3: SENARYO BAZLI TEST (SITUATIONAL JUDGEMENT)
             - Adayı teorik bilgiden çıkarıp pratik uygulamaya yönlendir.
@@ -400,5 +402,6 @@ if st.session_state.report_data:
             )
         except Exception as e:
             st.error(f"PDF oluşturulamadı: {e}")
+
 
 
