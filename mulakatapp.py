@@ -7,9 +7,10 @@ from fpdf import FPDF
 import os
 import requests
 import tempfile
-
-# DİKKAT: Ses kütüphanelerini buradan sildik!
-# Onları aşağıda fonksiyonların içinde çağıracağız.
+from audio_recorder_streamlit import audio_recorder
+import speech_recognition as sr
+from gTTS import gTTS
+import re # YENİ: Regex kütüphanesini ekledik (Mıknatıs)
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
@@ -36,34 +37,21 @@ def tr_to_en(text):
     for tr, en in tr_map.items(): text = text.replace(tr, en)
     return text
 
-# --- GÜVENLİ SES FONKSİYONLARI ---
-# Importları buraya taşıdık. Kütüphane yoksa site çökmez.
-
-def get_audio_recorder():
-    try:
-        from audio_recorder_streamlit import audio_recorder
-        return audio_recorder
-    except ImportError: return None
-
 def speech_to_text(audio_bytes):
+    r = sr.Recognizer()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
+        tmp_audio.write(audio_bytes)
+        tmp_path = tmp_audio.name
     try:
-        import speech_recognition as sr # BURADA ÇAĞIRIYORUZ
-        r = sr.Recognizer()
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
-            tmp_audio.write(audio_bytes)
-            tmp_path = tmp_audio.name
-        
         with sr.AudioFile(tmp_path) as source:
             audio_data = r.record(source)
             text = r.recognize_google(audio_data, language="tr-TR")
-        
-        os.remove(tmp_path)
-        return text
-    except Exception as e: return None
+            return text
+    except: return None
+    finally: os.remove(tmp_path)
 
 def text_to_speech(text):
     try:
-        from gTTS import gTTS # BURADA ÇAĞIRIYORUZ
         tts = gTTS(text=text, lang='tr')
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_mp3:
             tts.save(tmp_mp3.name)
@@ -207,8 +195,6 @@ if start_interview:
             for file in portfolio_files:
                 portfolio_text += f"\n--- DOSYA: {file.name} ---\n{get_pdf_text(file)}\n"
         try:
-           
-          # --- PROFESYONEL MÜLAKAT SİMÜLASYON PROTOKOLÜ (V3.2) ---
             system_prompt = f"""
             === SİSTEM KİMLİĞİ VE AMACI ===
             SEN, "AI-Powered Senior Talent Assessment Agent" (Yapay Zeka Destekli Kıdemli Yetenek Değerlendirme Uzmanı) OLARAK GÖREV YAPMAKTASIN. 
@@ -247,10 +233,13 @@ if start_interview:
             model = genai.GenerativeModel(model_name=selected_model, safety_settings=safety_settings)
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
+            
+            # Tetikleyici mesajı düzeltiyoruz
             chat.send_message(system_prompt)
-            # Tetikleyici
             response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
+            
             st.session_state.messages = [{"role": "assistant", "content": response.text}]
+            st.success("Başladı!")
         except Exception as e: st.error(f"Hata: {e}")
 
 # --- Sohbet Akışı ---
@@ -260,43 +249,24 @@ if st.session_state.chat_session:
         with st.chat_message(role):
             st.write(message["content"])
 
-    # Girdi Yöntemi
     col_mic, col_text = st.columns([1, 5])
     
-    # GÜVENLİ MİKROFON BUTONU
-    recorder = get_audio_recorder()
     audio_bytes = None
+    if 'audio_recorder' in globals():
+        with col_mic:
+            audio_bytes = audio_recorder(text="", recording_color="#e8b62c", neutral_color="#6aa36f", icon_name="microphone", icon_size="2x")
     
-    with col_mic:
-        if recorder:
-            audio_bytes = recorder(
-                text="",
-                recording_color="#e8b62c",
-                neutral_color="#6aa36f",
-                icon_name="microphone",
-                icon_size="2x",
-            )
-        else:
-            st.error("Ses modülü yüklenemedi")
-
     user_input = None
-    
-    # Ses İşleme
     if audio_bytes and audio_bytes != st.session_state.last_audio_bytes:
         if not st.session_state.finish_requested:
             st.session_state.last_audio_bytes = audio_bytes
             with st.spinner("Ses işleniyor..."):
-                user_input = speech_to_text(audio_bytes) # Fonksiyon içinde import edilecek
-                if user_input: 
-                    st.info(f"🎤 {user_input}")
-                else:
-                    st.warning("Ses kütüphanesi eksik veya ses anlaşılamadı.")
+                user_input = speech_to_text(audio_bytes)
+                if user_input: st.info(f"🎤 {user_input}")
 
-    # Yazı Girişi
     text_input = st.chat_input("Cevabın...")
     if text_input: user_input = text_input
 
-    # İşlem
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         if text_input:
@@ -311,45 +281,64 @@ if st.session_state.chat_session:
                     
                     with st.chat_message("assistant"):
                         st.write(ai_text)
-                        # Seslendirme (Güvenli)
                         audio_path = text_to_speech(ai_text)
-                        if audio_path:
-                            st.audio(audio_path, format="audio/mp3", autoplay=True)
+                        if audio_path: st.audio(audio_path, format="audio/mp3", autoplay=True)
             except Exception as e: st.error(f"Hata: {e}")
 
 # --- Raporlama ---
 if st.session_state.finish_requested and st.session_state.chat_session:
     with st.spinner("Analiz ediliyor..."):
-        try:
-            report_prompt = """
-            MÜLAKAT BİTTİ. Detaylı analiz yap.
-            🚨 KURAL: EĞER ADAY CEVAP VERMEDİYSE ("...", "bilmem") PUAN 0 OLSUN.
-            FORMAT:
-            SKOR: (0-100)
-            KARAR: (Olumlu / Olumsuz)
-            -- PUAN DETAYLARI --
-            TEKNİK: (0-100)
-            İLETİŞİM: (0-100)
-            PROBLEM_ÇÖZME: (0-100)
-            TEORİK_BİLGİ: (0-100)
-            POTANSİYEL: (0-100)
-            -- SÖZEL RAPOR --
-            (Kısa bir özet yaz)
-            """
-            response = st.session_state.chat_session.send_message(report_prompt)
-            full_text = response.text
+        max_retries = 3
+        retry_count = 0
+        success = False
+        
+        while retry_count < max_retries and not success:
+            try:
+                report_prompt = """
+                MÜLAKAT BİTTİ. Detaylı analiz yap.
+                🚨 KURAL: EĞER ADAY CEVAP VERMEDİYSE ("...", "bilmem") PUAN 0 OLSUN.
+                FORMAT:
+                SKOR: (0-100 arası sadece sayı)
+                KARAR: (Olumlu / Olumsuz)
+                -- PUAN DETAYLARI --
+                TEKNİK: (0-100)
+                İLETİŞİM: (0-100)
+                PROBLEM_ÇÖZME: (0-100)
+                TEORİK_BİLGİ: (0-100)
+                POTANSİYEL: (0-100)
+                -- SÖZEL RAPOR --
+                (Kısa bir özet yaz)
+                """
+                response = st.session_state.chat_session.send_message(report_prompt)
+                full_text = response.text
+                success = True
+            except Exception as e:
+                if "429" in str(e):
+                    retry_count += 1
+                    time.sleep(10)
+                else: break
+
+        if success:
+            # --- YENİ PARSING MANTIĞI (REGEX) ---
+            # Artık "SKOR: 78" veya "**SKOR**: 78" fark etmez, sayıyı çeker
+            score = 0
+            decision = "Belirsiz"
             
-            try: score = int(full_text.split("SKOR:")[1].split("\n")[0].strip())
-            except: score = 0
-            try: decision = full_text.split("KARAR:")[1].split("\n")[0].strip()
-            except: decision = "Belirsiz"
+            score_match = re.search(r"SKOR[:\s*]*(\d+)", full_text, re.IGNORECASE)
+            if score_match: score = int(score_match.group(1))
             
+            decision_match = re.search(r"KARAR[:\s*]*(.+)", full_text, re.IGNORECASE)
+            if decision_match: decision = decision_match.group(1).strip()
+
             categories = ["TEKNİK", "İLETİŞİM", "PROBLEM_ÇÖZME", "TEORİK_BİLGİ", "POTANSİYEL"]
             values = []
             for cat in categories:
-                try: val = int(full_text.split(f"{cat}:")[1].split("\n")[0].strip())
-                except: val = 50
-                values.append(val)
+                # Her kategori için regex araması
+                cat_match = re.search(rf"{cat}[:\s*]*(\d+)", full_text, re.IGNORECASE)
+                if cat_match:
+                    values.append(int(cat_match.group(1)))
+                else:
+                    values.append(50) # Bulamazsa ortalama ver
             
             try: verbal_report = full_text.split("-- SÖZEL RAPOR --")[1]
             except: verbal_report = full_text
@@ -363,45 +352,27 @@ if st.session_state.finish_requested and st.session_state.chat_session:
             }
             st.session_state.finish_requested = False
             st.rerun()
-
-        except Exception as e: st.error(f"Hata: {e}")
+        else:
+            st.error("Rapor oluşturulamadı. Lütfen tekrar deneyin.")
 
 # --- EKRAN: Rapor ve PDF ---
 if st.session_state.report_data:
     data = st.session_state.report_data
-    
     st.markdown("---")
     st.header("📊 Mülakat Sonuç Karnesi")
-    
     c1, c2 = st.columns(2)
     c1.metric("Genel Puan", f"{data['score']}/100")
     if "Olumlu" in data['decision']: c2.success(f"Karar: {data['decision']}")
     else: c2.error(f"Karar: {data['decision']}")
-    
     st.progress(data['score'])
-    
     col_chart, col_text = st.columns([1, 1])
     with col_chart:
-        fig = go.Figure(data=go.Scatterpolar(
-            r=data['values'], theta=data['categories'], fill='toself', name='Aday'
-        ))
+        fig = go.Figure(data=go.Scatterpolar(r=data['values'], theta=data['categories'], fill='toself', name='Aday'))
         fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
-    
     with col_text:
         st.info(data['text'])
-        
-        st.markdown("### 📥 Raporu İndir")
         try:
             pdf_bytes = create_pdf_report(data)
-            st.download_button(
-                label="📄 Raporu PDF Olarak İndir",
-                data=pdf_bytes,
-                file_name="mulakat_karnesi.pdf",
-                mime="application/pdf"
-            )
-        except Exception as e:
-            st.error(f"PDF oluşturulamadı: {e}")
-
-
-
+            st.download_button(label="📄 Raporu İndir (PDF)", data=pdf_bytes, file_name="mulakat_karnesi.pdf", mime="application/pdf")
+        except Exception as e: st.error(f"PDF Hatası: {e}")
