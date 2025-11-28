@@ -246,9 +246,9 @@ if start_interview:
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
             chat.send_message(system_prompt)
-            response = chat.send_message("Mülakatı başlat.")
+            # Tetikleyici
+            response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
             st.session_state.messages = [{"role": "assistant", "content": response.text}]
-            st.success("Başladı!")
         except Exception as e: st.error(f"Hata: {e}")
 
 # --- Sohbet Akışı ---
@@ -400,4 +400,5 @@ if st.session_state.report_data:
             )
         except Exception as e:
             st.error(f"PDF oluşturulamadı: {e}")
+
 
