@@ -7,9 +7,9 @@ from fpdf import FPDF
 import os
 import requests
 import tempfile
-from audio_recorder_streamlit import audio_recorder
-import speech_recognition as sr
-from gTTS import gTTS
+
+# DİKKAT: Ses kütüphanelerini buradan sildik!
+# Onları aşağıda fonksiyonların içinde çağıracağız.
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
@@ -36,21 +36,34 @@ def tr_to_en(text):
     for tr, en in tr_map.items(): text = text.replace(tr, en)
     return text
 
-def speech_to_text(audio_bytes):
-    r = sr.Recognizer()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
-        tmp_audio.write(audio_bytes)
-        tmp_path = tmp_audio.name
+# --- GÜVENLİ SES FONKSİYONLARI ---
+# Importları buraya taşıdık. Kütüphane yoksa site çökmez.
+
+def get_audio_recorder():
     try:
+        from audio_recorder_streamlit import audio_recorder
+        return audio_recorder
+    except ImportError: return None
+
+def speech_to_text(audio_bytes):
+    try:
+        import speech_recognition as sr # BURADA ÇAĞIRIYORUZ
+        r = sr.Recognizer()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
+            tmp_audio.write(audio_bytes)
+            tmp_path = tmp_audio.name
+        
         with sr.AudioFile(tmp_path) as source:
             audio_data = r.record(source)
             text = r.recognize_google(audio_data, language="tr-TR")
-            return text
-    except: return None
-    finally: os.remove(tmp_path)
+        
+        os.remove(tmp_path)
+        return text
+    except Exception as e: return None
 
 def text_to_speech(text):
     try:
+        from gTTS import gTTS # BURADA ÇAĞIRIYORUZ
         tts = gTTS(text=text, lang='tr')
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_mp3:
             tts.save(tmp_mp3.name)
@@ -153,7 +166,6 @@ with st.sidebar:
     
     st.markdown("---")
     if st.session_state.get('chat_session'):
-        # Butona basılınca state değişir
         if st.button("🏁 Mülakatı Bitir ve Raporla", type="primary"):
             st.session_state['finish_requested'] = True
 
@@ -171,7 +183,6 @@ if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_session" not in st.session_state: st.session_state.chat_session = None 
 if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
 if "report_data" not in st.session_state: st.session_state.report_data = None 
-# YENİ: Son işlenen sesi hafızada tutalım ki tekrar etmesin
 if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
 
 # --- Güvenlik ---
@@ -188,7 +199,7 @@ if start_interview:
         st.error("Eksik bilgi.")
     else:
         st.session_state.report_data = None
-        st.session_state.last_audio_bytes = None # Ses hafızasını sıfırla
+        st.session_state.last_audio_bytes = None
         genai.configure(api_key=api_key)
         cv_text = get_pdf_text(cv_file)
         portfolio_text = ""
@@ -225,26 +236,34 @@ if st.session_state.chat_session:
     # Girdi Yöntemi
     col_mic, col_text = st.columns([1, 5])
     
-    with col_mic:
-        audio_bytes = audio_recorder(
-            text="",
-            recording_color="#e8b62c",
-            neutral_color="#6aa36f",
-            icon_name="microphone",
-            icon_size="2x",
-        )
+    # GÜVENLİ MİKROFON BUTONU
+    recorder = get_audio_recorder()
+    audio_bytes = None
     
+    with col_mic:
+        if recorder:
+            audio_bytes = recorder(
+                text="",
+                recording_color="#e8b62c",
+                neutral_color="#6aa36f",
+                icon_name="microphone",
+                icon_size="2x",
+            )
+        else:
+            st.error("Ses modülü yüklenemedi")
+
     user_input = None
     
-    # --- SES KONTROLÜ (DÜZELTİLEN KISIM) ---
-    # Eğer ses varsa VE bu ses daha önce işlenmemişse
+    # Ses İşleme
     if audio_bytes and audio_bytes != st.session_state.last_audio_bytes:
-        # Eğer bitirme isteği yapıldıysa sesi görmezden gel
         if not st.session_state.finish_requested:
-            st.session_state.last_audio_bytes = audio_bytes # Sesi hafızaya at (tekrar etmesin)
+            st.session_state.last_audio_bytes = audio_bytes
             with st.spinner("Ses işleniyor..."):
-                user_input = speech_to_text(audio_bytes)
-                if user_input: st.info(f"🎤 {user_input}")
+                user_input = speech_to_text(audio_bytes) # Fonksiyon içinde import edilecek
+                if user_input: 
+                    st.info(f"🎤 {user_input}")
+                else:
+                    st.warning("Ses kütüphanesi eksik veya ses anlaşılamadı.")
 
     # Yazı Girişi
     text_input = st.chat_input("Cevabın...")
@@ -265,6 +284,7 @@ if st.session_state.chat_session:
                     
                     with st.chat_message("assistant"):
                         st.write(ai_text)
+                        # Seslendirme (Güvenli)
                         audio_path = text_to_speech(ai_text)
                         if audio_path:
                             st.audio(audio_path, format="audio/mp3", autoplay=True)
