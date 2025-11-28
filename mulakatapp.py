@@ -7,10 +7,10 @@ from fpdf import FPDF
 import os
 import requests
 import tempfile
-from audio_recorder_streamlit import audio_recorder
-import speech_recognition as sr
-from gTTS import gTTS
-import re # YENİ: Regex kütüphanesini ekledik (Mıknatıs)
+import re # Regex kütüphanesi (Skor okumak için şart)
+
+# DİKKAT: Ses kütüphanelerini buradan kaldırdık!
+# Onları aşağıda fonksiyonların içinde çağıracağız.
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
@@ -37,21 +37,34 @@ def tr_to_en(text):
     for tr, en in tr_map.items(): text = text.replace(tr, en)
     return text
 
-def speech_to_text(audio_bytes):
-    r = sr.Recognizer()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
-        tmp_audio.write(audio_bytes)
-        tmp_path = tmp_audio.name
+# --- GÜVENLİ SES FONKSİYONLARI ---
+# Importları buraya taşıdık. Kütüphane yoksa site çökmez.
+
+def get_audio_recorder():
     try:
+        from audio_recorder_streamlit import audio_recorder
+        return audio_recorder
+    except ImportError: return None
+
+def speech_to_text(audio_bytes):
+    try:
+        import speech_recognition as sr # BURADA ÇAĞIRIYORUZ
+        r = sr.Recognizer()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
+            tmp_audio.write(audio_bytes)
+            tmp_path = tmp_audio.name
+        
         with sr.AudioFile(tmp_path) as source:
             audio_data = r.record(source)
             text = r.recognize_google(audio_data, language="tr-TR")
-            return text
-    except: return None
-    finally: os.remove(tmp_path)
+        
+        os.remove(tmp_path)
+        return text
+    except Exception as e: return None
 
 def text_to_speech(text):
     try:
+        from gTTS import gTTS # BURADA ÇAĞIRIYORUZ
         tts = gTTS(text=text, lang='tr')
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_mp3:
             tts.save(tmp_mp3.name)
@@ -234,7 +247,6 @@ if start_interview:
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
             
-            # Tetikleyici mesajı düzeltiyoruz
             chat.send_message(system_prompt)
             response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
             
@@ -251,10 +263,12 @@ if st.session_state.chat_session:
 
     col_mic, col_text = st.columns([1, 5])
     
+    # GÜVENLİ MİKROFON ÇAĞRISI
     audio_bytes = None
-    if 'audio_recorder' in globals():
+    recorder = get_audio_recorder() # Fonksiyon içinde import edilir
+    if recorder:
         with col_mic:
-            audio_bytes = audio_recorder(text="", recording_color="#e8b62c", neutral_color="#6aa36f", icon_name="microphone", icon_size="2x")
+            audio_bytes = recorder(text="", recording_color="#e8b62c", neutral_color="#6aa36f", icon_name="microphone", icon_size="2x")
     
     user_input = None
     if audio_bytes and audio_bytes != st.session_state.last_audio_bytes:
@@ -285,7 +299,7 @@ if st.session_state.chat_session:
                         if audio_path: st.audio(audio_path, format="audio/mp3", autoplay=True)
             except Exception as e: st.error(f"Hata: {e}")
 
-# --- Raporlama ---
+# --- Raporlama (REGEX DÜZELTMELİ) ---
 if st.session_state.finish_requested and st.session_state.chat_session:
     with st.spinner("Analiz ediliyor..."):
         max_retries = 3
@@ -319,8 +333,7 @@ if st.session_state.finish_requested and st.session_state.chat_session:
                 else: break
 
         if success:
-            # --- YENİ PARSING MANTIĞI (REGEX) ---
-            # Artık "SKOR: 78" veya "**SKOR**: 78" fark etmez, sayıyı çeker
+            # REGEX PARSING
             score = 0
             decision = "Belirsiz"
             
@@ -333,12 +346,9 @@ if st.session_state.finish_requested and st.session_state.chat_session:
             categories = ["TEKNİK", "İLETİŞİM", "PROBLEM_ÇÖZME", "TEORİK_BİLGİ", "POTANSİYEL"]
             values = []
             for cat in categories:
-                # Her kategori için regex araması
                 cat_match = re.search(rf"{cat}[:\s*]*(\d+)", full_text, re.IGNORECASE)
-                if cat_match:
-                    values.append(int(cat_match.group(1)))
-                else:
-                    values.append(50) # Bulamazsa ortalama ver
+                if cat_match: values.append(int(cat_match.group(1)))
+                else: values.append(50)
             
             try: verbal_report = full_text.split("-- SÖZEL RAPOR --")[1]
             except: verbal_report = full_text
@@ -353,7 +363,7 @@ if st.session_state.finish_requested and st.session_state.chat_session:
             st.session_state.finish_requested = False
             st.rerun()
         else:
-            st.error("Rapor oluşturulamadı. Lütfen tekrar deneyin.")
+            st.error("Rapor oluşturulamadı.")
 
 # --- EKRAN: Rapor ve PDF ---
 if st.session_state.report_data:
