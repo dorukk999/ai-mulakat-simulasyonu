@@ -7,10 +7,7 @@ from fpdf import FPDF
 import os
 import requests
 import tempfile
-import re # Regex kütüphanesi (Skor okumak için şart)
-
-# DİKKAT: Ses kütüphanelerini buradan kaldırdık!
-# Onları aşağıda fonksiyonların içinde çağıracağız.
+import re
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
@@ -38,8 +35,6 @@ def tr_to_en(text):
     return text
 
 # --- GÜVENLİ SES FONKSİYONLARI ---
-# Importları buraya taşıdık. Kütüphane yoksa site çökmez.
-
 def get_audio_recorder():
     try:
         from audio_recorder_streamlit import audio_recorder
@@ -48,7 +43,7 @@ def get_audio_recorder():
 
 def speech_to_text(audio_bytes):
     try:
-        import speech_recognition as sr # BURADA ÇAĞIRIYORUZ
+        import speech_recognition as sr 
         r = sr.Recognizer()
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
             tmp_audio.write(audio_bytes)
@@ -57,14 +52,13 @@ def speech_to_text(audio_bytes):
         with sr.AudioFile(tmp_path) as source:
             audio_data = r.record(source)
             text = r.recognize_google(audio_data, language="tr-TR")
-        
         os.remove(tmp_path)
         return text
     except Exception as e: return None
 
 def text_to_speech(text):
     try:
-        from gTTS import gTTS # BURADA ÇAĞIRIYORUZ
+        from gTTS import gTTS 
         tts = gTTS(text=text, lang='tr')
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_mp3:
             tts.save(tmp_mp3.name)
@@ -141,22 +135,33 @@ with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    model_options = ["Önce API Key Girin"]
+    # --- MODEL LİSTESİ DÜZELTMESİ ---
+    # Listeyi Google'a bırakmıyoruz, en iyi modelleri elle ekliyoruz.
+    known_models = ["models/gemini-1.5-flash", "models/gemini-1.5-pro"]
+    model_options = known_models # Varsayılan olarak bunları kullan
+    
     if api_key:
         try:
             genai.configure(api_key=api_key)
-            options = []
+            # Yine de API'den gelenleri kontrol edelim ama üsttekileri koruyalım
+            fetched_models = []
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
-                    if "exp" not in m.name and "2.5" not in m.name: 
-                        options.append(m.name)
-            if options: model_options = options
-        except: st.error("API Key geçersiz.")
+                    fetched_models.append(m.name)
+            
+            # Eğer API'den gelen listede bizimkiler varsa veya yeni bişey varsa birleştir
+            if fetched_models:
+                # Bizimkiler en başta dursun
+                for fm in fetched_models:
+                    if fm not in known_models and "gemini" in fm:
+                        known_models.append(fm)
+                model_options = known_models
+        except: 
+            # Hata olsa bile en azından hardcoded listeyi göster
+            pass
 
-    index = 0
-    for i, name in enumerate(model_options):
-        if "1.5" in name and "flash" in name: index = i; break
-    selected_model = st.selectbox("Model Seçimi", model_options, index=index)
+    # Seçim Kutusu
+    selected_model = st.selectbox("Model Seçimi", model_options, index=0)
 
     with st.form("main_form"):
         st.info("Mülakat Detayları")
@@ -265,7 +270,7 @@ if st.session_state.chat_session:
     
     # GÜVENLİ MİKROFON ÇAĞRISI
     audio_bytes = None
-    recorder = get_audio_recorder() # Fonksiyon içinde import edilir
+    recorder = get_audio_recorder()
     if recorder:
         with col_mic:
             audio_bytes = recorder(text="", recording_color="#e8b62c", neutral_color="#6aa36f", icon_name="microphone", icon_size="2x")
@@ -299,7 +304,7 @@ if st.session_state.chat_session:
                         if audio_path: st.audio(audio_path, format="audio/mp3", autoplay=True)
             except Exception as e: st.error(f"Hata: {e}")
 
-# --- Raporlama (REGEX DÜZELTMELİ) ---
+# --- Raporlama (REGEX) ---
 if st.session_state.finish_requested and st.session_state.chat_session:
     with st.spinner("Analiz ediliyor..."):
         max_retries = 3
@@ -333,7 +338,6 @@ if st.session_state.finish_requested and st.session_state.chat_session:
                 else: break
 
         if success:
-            # REGEX PARSING
             score = 0
             decision = "Belirsiz"
             
