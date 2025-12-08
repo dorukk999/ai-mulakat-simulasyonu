@@ -135,14 +135,12 @@ with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    # --- MODEL LİSTESİ (GARANTİ İSİMLER) ---
-    # Kısa isimler (alias) hata verirse diye uzun versiyonları ekledik.
+    # --- MODEL LİSTESİ (SADELEŞTİRİLMİŞ) ---
+    # models/ ön eki olmadan ve latest etiketi olmadan en saf hali.
     model_options = [
-        "gemini-1.5-flash-latest", # En güncel Flash
-        "gemini-1.5-flash",        # Kısa isim
-        "gemini-1.5-flash-001",    # Sabit Sürüm (En Garantisi)
-        "gemini-1.5-pro-latest",   # Pro Modeli
-        "gemini-1.0-pro"           # Eski ama sağlam model (Yedek)
+        "gemini-1.5-flash", 
+        "gemini-1.5-pro",
+        "gemini-1.0-pro" # En eski ve sağlam yedek
     ]
     
     if api_key:
@@ -238,6 +236,7 @@ if start_interview:
             === BAŞLATMA ===
             Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
             """
+            # Model adını temiz bir şekilde veriyoruz
             model = genai.GenerativeModel(model_name=selected_model, safety_settings=safety_settings)
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
