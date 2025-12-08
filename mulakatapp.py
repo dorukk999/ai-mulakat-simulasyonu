@@ -135,21 +135,46 @@ with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    # --- MODEL LİSTESİ (SADELEŞTİRİLMİŞ) ---
-    # models/ ön eki olmadan ve latest etiketi olmadan en saf hali.
-    model_options = [
-        "gemini-1.5-flash", 
-        "gemini-1.5-pro",
-        "gemini-1.0-pro" # En eski ve sağlam yedek
-    ]
+    # --- MODEL BULUCU (OTOMATİK VE GARANTİLİ) ---
+    working_model_name = None
     
     if api_key:
         try:
             genai.configure(api_key=api_key)
-        except: pass
+            
+            # 1. Önce En İyileri Dene (Hardcoded)
+            # Bu isimler Google'ın standartlarıdır.
+            priority_models = [
+                "gemini-1.5-flash",
+                "gemini-1.5-flash-latest",
+                "gemini-1.0-pro",
+                "gemini-pro"
+            ]
+            
+            # Google'a "Sendeki modelleri ver" diyelim
+            try:
+                all_models = genai.list_models()
+                for m in all_models:
+                    if 'generateContent' in m.supported_generation_methods:
+                        # Eğer listedeki model bizim öncelikli listemizde varsa onu kap
+                        # Yoksa da 'flash' veya 'pro' olanı al
+                        if "flash" in m.name:
+                            working_model_name = m.name # models/gemini-1.5-flash-001 gibi gelir
+                            break
+            except: pass
 
-    # Seçim Kutusu
-    selected_model = st.selectbox("Model Seçimi", model_options, index=0)
+            # Eğer listeden bulamazsak, manuel listeden deneyelim
+            if not working_model_name:
+                for pm in priority_models:
+                    working_model_name = pm # Geçici ata
+                    break 
+
+        except: st.error("API Key Hatalı")
+    
+    if working_model_name:
+        st.success(f"✅ Aktif Model: {working_model_name.replace('models/', '')}")
+    elif api_key:
+        st.warning("Model aranıyor...")
 
     with st.form("main_form"):
         st.info("Mülakat Detayları")
@@ -236,8 +261,10 @@ if start_interview:
             === BAŞLATMA ===
             Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
             """
-            # Model adını temiz bir şekilde veriyoruz
-            model = genai.GenerativeModel(model_name=selected_model, safety_settings=safety_settings)
+            # Otomatik bulunan modeli kullan
+            final_model_name = working_model_name if working_model_name else "gemini-1.5-flash"
+            
+            model = genai.GenerativeModel(model_name=final_model_name, safety_settings=safety_settings)
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
             
@@ -245,7 +272,7 @@ if start_interview:
             response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
             
             st.session_state.messages = [{"role": "assistant", "content": response.text}]
-            st.success("Başladı!")
+            st.success(f"Başladı! (Model: {final_model_name})")
         except Exception as e: st.error(f"Hata: {e}")
 
 # --- Sohbet Akışı ---
