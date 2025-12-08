@@ -135,30 +135,26 @@ with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    # --- MODEL LİSTESİ DÜZELTMESİ ---
-    # Listeyi Google'a bırakmıyoruz, en iyi modelleri elle ekliyoruz.
-    known_models = ["models/gemini-1.5-flash", "models/gemini-1.5-pro"]
-    model_options = known_models # Varsayılan olarak bunları kullan
+    # --- AKILLI MODEL LİSTELEME (DÜZELTİLDİ) ---
+    # Varsayılan (Eğer internet yoksa veya API key girilmediyse)
+    # Burada 'models/' önekini kaldırdık, en sade halini yazdık.
+    model_options = ["gemini-1.5-flash", "gemini-1.5-pro"]
     
     if api_key:
         try:
             genai.configure(api_key=api_key)
-            # Yine de API'den gelenleri kontrol edelim ama üsttekileri koruyalım
             fetched_models = []
+            # Google'a sor: "Elinizde ne var?"
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
-                    fetched_models.append(m.name)
+                    fetched_models.append(m.name) # API ne döndürürse onu al (models/gemini... gibi)
             
-            # Eğer API'den gelen listede bizimkiler varsa veya yeni bişey varsa birleştir
+            # Eğer Google cevap verdiyse listeyi güncelle
             if fetched_models:
-                # Bizimkiler en başta dursun
-                for fm in fetched_models:
-                    if fm not in known_models and "gemini" in fm:
-                        known_models.append(fm)
-                model_options = known_models
-        except: 
-            # Hata olsa bile en azından hardcoded listeyi göster
-            pass
+                # Flash modellerini en üste al
+                sorted_models = sorted(fetched_models, key=lambda x: "flash" not in x.lower())
+                model_options = sorted_models
+        except: pass
 
     # Seçim Kutusu
     selected_model = st.selectbox("Model Seçimi", model_options, index=0)
