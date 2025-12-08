@@ -135,25 +135,19 @@ with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    # --- AKILLI MODEL LİSTELEME (DÜZELTİLDİ) ---
-    # Varsayılan (Eğer internet yoksa veya API key girilmediyse)
-    # Burada 'models/' önekini kaldırdık, en sade halini yazdık.
-    model_options = ["gemini-1.5-flash", "gemini-1.5-pro"]
+    # --- MODEL LİSTESİ (ZORLAMA YÖNTEMİ) ---
+    # API'den liste çekmeyi bıraktık çünkü hata veriyor veya eksik getiriyor.
+    # Bu isimler Google'ın sabit model isimleridir.
+    model_options = [
+        "gemini-1.5-flash", 
+        "gemini-1.5-pro",
+        "gemini-1.0-pro"
+    ]
     
     if api_key:
         try:
             genai.configure(api_key=api_key)
-            fetched_models = []
-            # Google'a sor: "Elinizde ne var?"
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    fetched_models.append(m.name) # API ne döndürürse onu al (models/gemini... gibi)
-            
-            # Eğer Google cevap verdiyse listeyi güncelle
-            if fetched_models:
-                # Flash modellerini en üste al
-                sorted_models = sorted(fetched_models, key=lambda x: "flash" not in x.lower())
-                model_options = sorted_models
+            # Bağlantı testi (Sadece configure etmek yetmez)
         except: pass
 
     # Seçim Kutusu
@@ -264,7 +258,6 @@ if st.session_state.chat_session:
 
     col_mic, col_text = st.columns([1, 5])
     
-    # GÜVENLİ MİKROFON ÇAĞRISI
     audio_bytes = None
     recorder = get_audio_recorder()
     if recorder:
