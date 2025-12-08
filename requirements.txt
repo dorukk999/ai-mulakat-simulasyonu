@@ -1,13 +1,11 @@
-# Ses Kutuphaneleri
-gTTS
-SpeechRecognition
-audio-recorder-streamlit
-# Digerleri
 streamlit
-google-generativeai
+google-generativeai>=0.8.3
 pypdf
 plotly
 fpdf
+audio-recorder-streamlit
+gTTS
+SpeechRecognition
 
 
 
