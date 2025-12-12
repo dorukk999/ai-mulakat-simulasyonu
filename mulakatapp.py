@@ -135,40 +135,30 @@ with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    # --- MODEL BULUCU (OTOMATİK VE GARANTİLİ) ---
     working_model_name = None
     
     if api_key:
         try:
             genai.configure(api_key=api_key)
-            
-            # 1. Önce En İyileri Dene (Hardcoded)
-            # Bu isimler Google'ın standartlarıdır.
             priority_models = [
                 "gemini-1.5-flash",
                 "gemini-1.5-flash-latest",
                 "gemini-1.0-pro",
                 "gemini-pro"
             ]
-            
-            # Google'a "Sendeki modelleri ver" diyelim
             try:
                 all_models = genai.list_models()
                 for m in all_models:
                     if 'generateContent' in m.supported_generation_methods:
-                        # Eğer listedeki model bizim öncelikli listemizde varsa onu kap
-                        # Yoksa da 'flash' veya 'pro' olanı al
                         if "flash" in m.name:
-                            working_model_name = m.name # models/gemini-1.5-flash-001 gibi gelir
+                            working_model_name = m.name
                             break
             except: pass
 
-            # Eğer listeden bulamazsak, manuel listeden deneyelim
             if not working_model_name:
                 for pm in priority_models:
-                    working_model_name = pm # Geçici ata
+                    working_model_name = pm
                     break 
-
         except: st.error("API Key Hatalı")
     
     if working_model_name:
@@ -203,6 +193,7 @@ if "chat_session" not in st.session_state: st.session_state.chat_session = None
 if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
 if "report_data" not in st.session_state: st.session_state.report_data = None 
 if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
+if "active_model_name" not in st.session_state: st.session_state.active_model_name = "Belirlenmedi"
 
 # --- Güvenlik ---
 safety_settings = [
@@ -225,55 +216,68 @@ if start_interview:
         if portfolio_files:
             for file in portfolio_files:
                 portfolio_text += f"\n--- DOSYA: {file.name} ---\n{get_pdf_text(file)}\n"
-        try:
-            system_prompt = f"""
-            === SİSTEM KİMLİĞİ VE AMACI ===
-            SEN, "AI-Powered Senior Talent Assessment Agent" (Yapay Zeka Destekli Kıdemli Yetenek Değerlendirme Uzmanı) OLARAK GÖREV YAPMAKTASIN. 
-            AMACIN: Aşağıda sunulan veri setlerini analiz ederek, aday ile gerçekçi, yetkinlik bazlı ve yapılandırılmış bir teknik mülakat gerçekleştirmektir.
-            
-            === BAĞLAMSAL VERİ SETİ (CONTEXT) ===
-            1. HEDEF POZİSYON (JD): {job_description}
-            2. ADAY PROFİLİ (CV): {cv_text}
-            3. EK DÖKÜMANLAR (PORTFOLYO): {portfolio_text}
-            
-            === YÜRÜTME ALGORİTMASI (EXECUTION PROTOCOL) ===
-            
-            ADIM 1: DİNAMİK ROL ADAPTASYONU (DYNAMIC PERSONA)
-            - İş İlanını (JD) analiz et ve sektörü belirle (Örn: Yazılım, Eğitim, Finans).
-            - İlgili sektöre uygun "Hiring Manager" (İşe Alım Yöneticisi) kimliğine bürün.
-            - Dil ve Ton Ayarı: Sektörel jargon kullan (Örn: Yazılımcı için "Tech Stack", Öğretmen için "Pedagojik Formasyon").
-            
-            ADIM 2: YETKİNLİK SORGULAMA STRATEJİSİ (CBI - Competency Based Interviewing)
-            - Adayın beyanlarını asla yüzeyden kabul etme. "Derinlemesine Sorgulama" (Deep-Dive) yap.
-            - STAR Metodolojisi Entegrasyonu (Implicit Guidance): Adaya doğrudan "STAR kullan" demek yerine, sorularınla onu yönlendir.
-              (Örn: "Bu projede karşılaştığın spesifik Zorluk (S) neydi?", "Tam olarak senin Görevin (T/A) neydi?", "Sonuç (R) ne oldu?" şeklinde parçalı sorular sor.)
-            - Tutarlılık Analizi: CV'deki iddialar ile sohbet sırasındaki cevaplar arasındaki tutarsızlıkları yakala.
-            
-            ADIM 3: SENARYO BAZLI TEST (SITUATIONAL JUDGEMENT)
-            - Adayı teorik bilgiden çıkarıp pratik uygulamaya yönlendir.
-            - Anlık kriz senaryoları üret (Örn: "Sistem çöktü", "Veli şikayet etti") ve çözüm reflekslerini ölç.
-            
-            === KISITLAMALAR VE KURALLAR (CONSTRAINTS) ===
-            1. TEK SORU PRENSİBİ: Bilişsel yükü yönetmek için her seferinde SADECE BİR soru sor.
-            2. OBJEKTİFLİK: Duygusal tepkiler verme, analitik ve profesyonel kal.
-            3. KOPYALA-YAPIŞTIR ENGELİ: Adayın yapay veya ezber cevap verdiğini hissedersen, "Bunu kendi deneyiminle örneklendir" diyerek müdahale et.
-            
-            === BAŞLATMA ===
-            Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
-            """
-            # Otomatik bulunan modeli kullan
-            final_model_name = working_model_name if working_model_name else "gemini-1.5-flash"
-            
-            model = genai.GenerativeModel(model_name=final_model_name, safety_settings=safety_settings)
-            chat = model.start_chat(history=[])
-            st.session_state.chat_session = chat
-            
-            chat.send_message(system_prompt)
-            response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
-            
-            st.session_state.messages = [{"role": "assistant", "content": response.text}]
-            st.success(f"Başladı! (Model: {final_model_name})")
-        except Exception as e: st.error(f"Hata: {e}")
+        
+        model_candidates = ["gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-pro", "gemini-1.0-pro"]
+        active_model = None
+        
+        with st.spinner("Uygun yapay zeka modeli aranıyor..."):
+            for m_name in model_candidates:
+                try:
+                    test_model = genai.GenerativeModel(m_name)
+                    test_model.generate_content("Test")
+                    active_model = test_model
+                    st.session_state.active_model_name = m_name
+                    break
+                except: continue
+        
+        if active_model is None:
+            st.error("❌ Hiçbir model çalıştırılamadı. Lütfen API Key'inizi kontrol edin.")
+        else:
+            try:
+                system_prompt = f"""
+                === SİSTEM KİMLİĞİ VE AMACI ===
+                SEN, "AI-Powered Senior Talent Assessment Agent" (Yapay Zeka Destekli Kıdemli Yetenek Değerlendirme Uzmanı) OLARAK GÖREV YAPMAKTASIN. 
+                AMACIN: Aşağıda sunulan veri setlerini analiz ederek, aday ile gerçekçi, yetkinlik bazlı ve yapılandırılmış bir teknik mülakat gerçekleştirmektir.
+                
+                === BAĞLAMSAL VERİ SETİ (CONTEXT) ===
+                1. HEDEF POZİSYON (JD): {job_description}
+                2. ADAY PROFİLİ (CV): {cv_text}
+                3. EK DÖKÜMANLAR (PORTFOLYO): {portfolio_text}
+                
+                === YÜRÜTME ALGORİTMASI (EXECUTION PROTOCOL) ===
+                
+                ADIM 1: DİNAMİK ROL ADAPTASYONU (DYNAMIC PERSONA)
+                - İş İlanını (JD) analiz et ve sektörü belirle (Örn: Yazılım, Eğitim, Finans).
+                - İlgili sektöre uygun "Hiring Manager" (İşe Alım Yöneticisi) kimliğine bürün.
+                - Dil ve Ton Ayarı: Sektörel jargon kullan (Örn: Yazılımcı için "Tech Stack", Öğretmen için "Pedagojik Formasyon").
+                
+                ADIM 2: YETKİNLİK SORGULAMA STRATEJİSİ (CBI - Competency Based Interviewing)
+                - Adayın beyanlarını asla yüzeyden kabul etme. "Derinlemesine Sorgulama" (Deep-Dive) yap.
+                - STAR Metodolojisi Entegrasyonu (Implicit Guidance): Adaya doğrudan "STAR kullan" demek yerine, sorularınla onu yönlendir.
+                - Tutarlılık Analizi: CV'deki iddialar ile sohbet sırasındaki cevaplar arasındaki tutarsızlıkları yakala.
+                
+                ADIM 3: SENARYO BAZLI TEST (SITUATIONAL JUDGEMENT)
+                - Adayı teorik bilgiden çıkarıp pratik uygulamaya yönlendir.
+                - Anlık kriz senaryoları üret (Örn: "Sistem çöktü", "Veli şikayet etti") ve çözüm reflekslerini ölç.
+                
+                === KISITLAMALAR VE KURALLAR (CONSTRAINTS) ===
+                1. TEK SORU PRENSİBİ: Bilişsel yükü yönetmek için her seferinde SADECE BİR soru sor.
+                2. OBJEKTİFLİK: Duygusal tepkiler verme, analitik ve profesyonel kal.
+                3. KOPYALA-YAPIŞTIR ENGELİ: Adayın yapay veya ezber cevap verdiğini hissedersen, "Bunu kendi deneyiminle örneklendir" diyerek müdahale et.
+                
+                === BAŞLATMA ===
+                Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
+                """
+                model = genai.GenerativeModel(model_name=st.session_state.active_model_name, safety_settings=safety_settings)
+                chat = model.start_chat(history=[])
+                st.session_state.chat_session = chat
+                
+                chat.send_message(system_prompt)
+                response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
+                
+                st.session_state.messages = [{"role": "assistant", "content": response.text}]
+                st.success(f"Başladı! (Model: {st.session_state.active_model_name})")
+            except Exception as e: st.error(f"Sohbet başlatma hatası: {e}")
 
 # --- Sohbet Akışı ---
 if st.session_state.chat_session:
@@ -282,9 +286,31 @@ if st.session_state.chat_session:
         with st.chat_message(role):
             st.write(message["content"])
 
+    # --- İPUCU VE GİRDİ ALANI ---
+    # İpucu butonunu ses/yazı alanının hemen üstüne koyuyoruz
+    
+    # Sadece en son mesaj asistansa (yani soru sorulmuşsa) ipucu göster
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
+        with st.expander("💡 Takıldınız mı? İpucu Alın"):
+            if st.button("AI Koçundan Yardım İste"):
+                with st.spinner("Koç soruyu analiz ediyor..."):
+                    try:
+                        # Yan Kanal İsteği (Ana sohbeti kirletmez)
+                        coach_model = genai.GenerativeModel(st.session_state.active_model_name)
+                        last_question = st.session_state.messages[-1]["content"]
+                        
+                        hint_prompt = f"""
+                        GÖREV: Sen yardımcı bir mülakat koçusun.
+                        DURUM: Aday şu soruya cevap vermekte zorlandı: "{last_question}"
+                        YAPMAN GEREKEN: Cevabı ASLA söyleme. Sadece adayın düşünmesini tetikleyecek, yolu gösteren kısa ve zekice bir ipucu ver.
+                        """
+                        hint_response = coach_model.generate_content(hint_prompt)
+                        st.info(f"🔑 **İpucu:** {hint_response.text}")
+                    except Exception as e:
+                        st.warning("İpucu şu an oluşturulamadı.")
+
     col_mic, col_text = st.columns([1, 5])
     
-    # GÜVENLİ MİKROFON ÇAĞRISI
     audio_bytes = None
     recorder = get_audio_recorder()
     if recorder:
