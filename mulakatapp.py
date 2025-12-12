@@ -139,52 +139,31 @@ def get_pdf_text(pdf_file):
     except: pass
     return text
 
-# --- Hafıza ---
-if "messages" not in st.session_state: st.session_state.messages = [] 
-if "chat_session" not in st.session_state: st.session_state.chat_session = None 
-if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
-if "report_data" not in st.session_state: st.session_state.report_data = None 
-if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
-# Çalışan modeli hafızada tut
-if "working_model" not in st.session_state: st.session_state.working_model = None
-
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    # --- MODEL BULUCU (BRUTE FORCE) ---
-    if api_key and not st.session_state.working_model:
-        genai.configure(api_key=api_key)
-        
-        # Denenecek model isimleri (Sırasıyla)
-        candidates = [
-            "gemini-1.5-flash",          # En iyisi (Yalın)
-            "models/gemini-1.5-flash",   # Prefixli
-            "gemini-1.5-flash-latest",   # Etiketli
-            "gemini-1.5-flash-001",      # Versiyonlu
-            "gemini-1.5-pro",            # Pro
-            "gemini-pro"                 # Eski (En son çare)
-        ]
-        
-        found = False
-        with st.spinner("Uygun model aranıyor..."):
-            for cand in candidates:
-                try:
-                    # Test atışı yap
-                    model = genai.GenerativeModel(cand)
-                    model.generate_content("Test")
-                    st.session_state.working_model = cand
-                    found = True
-                    break # Bulduysan çık
-                except:
-                    continue # Bulamadıysan sıradakine geç
-        
-        if not found:
-            st.error("❌ Geçerli bir model bulunamadı veya API Key hatalı.")
+    # --- GARANTİ MODEL LİSTESİ ---
+    # Otomatik arama hata verdiği için manuel listeye döndük.
+    # Bu liste hem prefixli hem prefixsiz versiyonları içerir.
+    # Biri çalışmazsa diğerini seçersin.
+    model_options = [
+        "gemini-1.5-flash",          # EN TERCİH EDİLEN
+        "models/gemini-1.5-flash",   # Alternatif 1 (404 alırsan bunu seç)
+        "gemini-1.5-flash-latest",   # Alternatif 2
+        "gemini-1.5-pro",            # Daha zeki ama yavaş
+        "models/gemini-1.5-pro",
+        "gemini-1.0-pro"             # En eski ve sağlam yedek
+    ]
+    
+    if api_key:
+        try:
+            genai.configure(api_key=api_key)
+        except: pass
 
-    if st.session_state.working_model:
-        st.success(f"✅ Bağlandı: {st.session_state.working_model}")
+    # Model Seçim Kutusu
+    selected_model = st.selectbox("Model Seçimi (Hata alırsanız değiştirin)", model_options, index=0)
 
     with st.form("main_form"):
         st.info("Mülakat Detayları")
@@ -198,6 +177,12 @@ with st.sidebar:
         if st.button("🏁 Mülakatı Bitir ve Raporla", type="primary"):
             st.session_state['finish_requested'] = True
 
+# --- Hafıza ---
+if "messages" not in st.session_state: st.session_state.messages = [] 
+if "chat_session" not in st.session_state: st.session_state.chat_session = None 
+if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
+if "report_data" not in st.session_state: st.session_state.report_data = None 
+if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
 
 # --- Güvenlik ---
 safety_settings = [
@@ -211,8 +196,6 @@ safety_settings = [
 if start_interview:
     if not api_key or not cv_file:
         st.error("Eksik bilgi.")
-    elif not st.session_state.working_model:
-        st.error("Model bulunamadı.")
     else:
         st.session_state.report_data = None
         st.session_state.last_audio_bytes = None
@@ -257,9 +240,8 @@ if start_interview:
             === BAŞLATMA ===
             Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
             """
-            
-            # BULUNAN MODELİ KULLAN
-            model = genai.GenerativeModel(model_name=st.session_state.working_model, safety_settings=safety_settings)
+            # SEÇİLEN MODELİ KULLAN
+            model = genai.GenerativeModel(model_name=selected_model, safety_settings=safety_settings)
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
             
@@ -267,7 +249,7 @@ if start_interview:
             response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
             
             st.session_state.messages = [{"role": "assistant", "content": response.text}]
-            st.success(f"Başladı! (Model: {st.session_state.working_model})")
+            st.success(f"Başladı! (Model: {selected_model})")
         except Exception as e: st.error(f"Başlatma Hatası: {e}")
 
 # --- Sohbet Akışı ---
@@ -277,18 +259,19 @@ if st.session_state.chat_session:
         with st.chat_message(role):
             st.write(message["content"])
 
-    # --- İPUCU VE GİRDİ ALANI ---
+    # --- İPUCU ALANI ---
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
         with st.expander("💡 Takıldınız mı? İpucu Alın"):
             if st.button("AI Koçundan Yardım İste"):
                 with st.spinner("Koç soruyu analiz ediyor..."):
                     try:
-                        coach_model = genai.GenerativeModel(st.session_state.working_model) 
+                        coach_model = genai.GenerativeModel(selected_model) 
                         last_question = st.session_state.messages[-1]["content"]
                         hint_prompt = f"Adaya şu soru için cevabı söylemeden bir ipucu ver: {last_question}"
                         hint_response = coach_model.generate_content(hint_prompt)
                         st.info(f"🔑 **İpucu:** {hint_response.text}")
-                    except: st.warning("İpucu alınamadı.")
+                    except Exception as e:
+                        st.warning("İpucu alınamadı.")
 
     col_mic, col_text = st.columns([1, 5])
     
