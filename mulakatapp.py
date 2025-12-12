@@ -130,41 +130,36 @@ def create_pdf_report(data):
         pdf_bytes = tmp_file.read()
     return pdf_bytes
 
+# --- Fonksiyonlar ---
+def get_pdf_text(pdf_file):
+    text = ""
+    try:
+        reader = PdfReader(pdf_file)
+        for page in reader.pages: text += page.extract_text()
+    except: pass
+    return text
+
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    working_model_name = None
+    # --- MODEL SEÇİMİ (MANUEL VE GÜVENLİ) ---
+    # Otomatik arama yok. Direkt listeyi veriyoruz.
+    model_options = [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-pro",
+        "gemini-1.0-pro"
+    ]
     
+    # API Key girildiyse yapılandır
     if api_key:
         try:
             genai.configure(api_key=api_key)
-            priority_models = [
-                "gemini-1.5-flash",
-                "gemini-1.5-flash-latest",
-                "gemini-1.0-pro",
-                "gemini-pro"
-            ]
-            try:
-                all_models = genai.list_models()
-                for m in all_models:
-                    if 'generateContent' in m.supported_generation_methods:
-                        if "flash" in m.name:
-                            working_model_name = m.name
-                            break
-            except: pass
+        except: pass
 
-            if not working_model_name:
-                for pm in priority_models:
-                    working_model_name = pm
-                    break 
-        except: st.error("API Key Hatalı")
-    
-    if working_model_name:
-        st.success(f"✅ Aktif Model: {working_model_name.replace('models/', '')}")
-    elif api_key:
-        st.warning("Model aranıyor...")
+    selected_model = st.selectbox("Model Seçimi", model_options, index=0)
 
     with st.form("main_form"):
         st.info("Mülakat Detayları")
@@ -178,22 +173,12 @@ with st.sidebar:
         if st.button("🏁 Mülakatı Bitir ve Raporla", type="primary"):
             st.session_state['finish_requested'] = True
 
-# --- Fonksiyonlar ---
-def get_pdf_text(pdf_file):
-    text = ""
-    try:
-        reader = PdfReader(pdf_file)
-        for page in reader.pages: text += page.extract_text()
-    except: pass
-    return text
-
 # --- Hafıza ---
 if "messages" not in st.session_state: st.session_state.messages = [] 
 if "chat_session" not in st.session_state: st.session_state.chat_session = None 
 if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
 if "report_data" not in st.session_state: st.session_state.report_data = None 
 if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
-if "active_model_name" not in st.session_state: st.session_state.active_model_name = "Belirlenmedi"
 
 # --- Güvenlik ---
 safety_settings = [
@@ -216,68 +201,52 @@ if start_interview:
         if portfolio_files:
             for file in portfolio_files:
                 portfolio_text += f"\n--- DOSYA: {file.name} ---\n{get_pdf_text(file)}\n"
-        
-        model_candidates = ["gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-pro", "gemini-1.0-pro"]
-        active_model = None
-        
-        with st.spinner("Uygun yapay zeka modeli aranıyor..."):
-            for m_name in model_candidates:
-                try:
-                    test_model = genai.GenerativeModel(m_name)
-                    test_model.generate_content("Test")
-                    active_model = test_model
-                    st.session_state.active_model_name = m_name
-                    break
-                except: continue
-        
-        if active_model is None:
-            st.error("❌ Hiçbir model çalıştırılamadı. Lütfen API Key'inizi kontrol edin.")
-        else:
-            try:
-                system_prompt = f"""
-                === SİSTEM KİMLİĞİ VE AMACI ===
-                SEN, "AI-Powered Senior Talent Assessment Agent" (Yapay Zeka Destekli Kıdemli Yetenek Değerlendirme Uzmanı) OLARAK GÖREV YAPMAKTASIN. 
-                AMACIN: Aşağıda sunulan veri setlerini analiz ederek, aday ile gerçekçi, yetkinlik bazlı ve yapılandırılmış bir teknik mülakat gerçekleştirmektir.
-                
-                === BAĞLAMSAL VERİ SETİ (CONTEXT) ===
-                1. HEDEF POZİSYON (JD): {job_description}
-                2. ADAY PROFİLİ (CV): {cv_text}
-                3. EK DÖKÜMANLAR (PORTFOLYO): {portfolio_text}
-                
-                === YÜRÜTME ALGORİTMASI (EXECUTION PROTOCOL) ===
-                
-                ADIM 1: DİNAMİK ROL ADAPTASYONU (DYNAMIC PERSONA)
-                - İş İlanını (JD) analiz et ve sektörü belirle (Örn: Yazılım, Eğitim, Finans).
-                - İlgili sektöre uygun "Hiring Manager" (İşe Alım Yöneticisi) kimliğine bürün.
-                - Dil ve Ton Ayarı: Sektörel jargon kullan (Örn: Yazılımcı için "Tech Stack", Öğretmen için "Pedagojik Formasyon").
-                
-                ADIM 2: YETKİNLİK SORGULAMA STRATEJİSİ (CBI - Competency Based Interviewing)
-                - Adayın beyanlarını asla yüzeyden kabul etme. "Derinlemesine Sorgulama" (Deep-Dive) yap.
-                - STAR Metodolojisi Entegrasyonu (Implicit Guidance): Adaya doğrudan "STAR kullan" demek yerine, sorularınla onu yönlendir.
-                - Tutarlılık Analizi: CV'deki iddialar ile sohbet sırasındaki cevaplar arasındaki tutarsızlıkları yakala.
-                
-                ADIM 3: SENARYO BAZLI TEST (SITUATIONAL JUDGEMENT)
-                - Adayı teorik bilgiden çıkarıp pratik uygulamaya yönlendir.
-                - Anlık kriz senaryoları üret (Örn: "Sistem çöktü", "Veli şikayet etti") ve çözüm reflekslerini ölç.
-                
-                === KISITLAMALAR VE KURALLAR (CONSTRAINTS) ===
-                1. TEK SORU PRENSİBİ: Bilişsel yükü yönetmek için her seferinde SADECE BİR soru sor.
-                2. OBJEKTİFLİK: Duygusal tepkiler verme, analitik ve profesyonel kal.
-                3. KOPYALA-YAPIŞTIR ENGELİ: Adayın yapay veya ezber cevap verdiğini hissedersen, "Bunu kendi deneyiminle örneklendir" diyerek müdahale et.
-                
-                === BAŞLATMA ===
-                Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
-                """
-                model = genai.GenerativeModel(model_name=st.session_state.active_model_name, safety_settings=safety_settings)
-                chat = model.start_chat(history=[])
-                st.session_state.chat_session = chat
-                
-                chat.send_message(system_prompt)
-                response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
-                
-                st.session_state.messages = [{"role": "assistant", "content": response.text}]
-                st.success(f"Başladı! (Model: {st.session_state.active_model_name})")
-            except Exception as e: st.error(f"Sohbet başlatma hatası: {e}")
+        try:
+            system_prompt = f"""
+            === SİSTEM KİMLİĞİ VE AMACI ===
+            SEN, "AI-Powered Senior Talent Assessment Agent" (Yapay Zeka Destekli Kıdemli Yetenek Değerlendirme Uzmanı) OLARAK GÖREV YAPMAKTASIN. 
+            AMACIN: Aşağıda sunulan veri setlerini analiz ederek, aday ile gerçekçi, yetkinlik bazlı ve yapılandırılmış bir teknik mülakat gerçekleştirmektir.
+            
+            === BAĞLAMSAL VERİ SETİ (CONTEXT) ===
+            1. HEDEF POZİSYON (JD): {job_description}
+            2. ADAY PROFİLİ (CV): {cv_text}
+            3. EK DÖKÜMANLAR (PORTFOLYO): {portfolio_text}
+            
+            === YÜRÜTME ALGORİTMASI (EXECUTION PROTOCOL) ===
+            
+            ADIM 1: DİNAMİK ROL ADAPTASYONU (DYNAMIC PERSONA)
+            - İş İlanını (JD) analiz et ve sektörü belirle (Örn: Yazılım, Eğitim, Finans).
+            - İlgili sektöre uygun "Hiring Manager" (İşe Alım Yöneticisi) kimliğine bürün.
+            - Dil ve Ton Ayarı: Sektörel jargon kullan (Örn: Yazılımcı için "Tech Stack", Öğretmen için "Pedagojik Formasyon").
+            
+            ADIM 2: YETKİNLİK SORGULAMA STRATEJİSİ (CBI - Competency Based Interviewing)
+            - Adayın beyanlarını asla yüzeyden kabul etme. "Derinlemesine Sorgulama" (Deep-Dive) yap.
+            - STAR Metodolojisi Entegrasyonu (Implicit Guidance): Adaya doğrudan "STAR kullan" demek yerine, sorularınla onu yönlendir.
+            - Tutarlılık Analizi: CV'deki iddialar ile sohbet sırasındaki cevaplar arasındaki tutarsızlıkları yakala.
+            
+            ADIM 3: SENARYO BAZLI TEST (SITUATIONAL JUDGEMENT)
+            - Adayı teorik bilgiden çıkarıp pratik uygulamaya yönlendir.
+            - Anlık kriz senaryoları üret (Örn: "Sistem çöktü", "Veli şikayet etti") ve çözüm reflekslerini ölç.
+            
+            === KISITLAMALAR VE KURALLAR (CONSTRAINTS) ===
+            1. TEK SORU PRENSİBİ: Bilişsel yükü yönetmek için her seferinde SADECE BİR soru sor.
+            2. OBJEKTİFLİK: Duygusal tepkiler verme, analitik ve profesyonel kal.
+            3. KOPYALA-YAPIŞTIR ENGELİ: Adayın yapay veya ezber cevap verdiğini hissedersen, "Bunu kendi deneyiminle örneklendir" diyerek müdahale et.
+            
+            === BAŞLATMA ===
+            Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
+            """
+            # SEÇİLEN MODELİ KULLAN
+            model = genai.GenerativeModel(model_name=selected_model, safety_settings=safety_settings)
+            chat = model.start_chat(history=[])
+            st.session_state.chat_session = chat
+            
+            chat.send_message(system_prompt)
+            response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
+            
+            st.session_state.messages = [{"role": "assistant", "content": response.text}]
+            st.success(f"Başladı! (Model: {selected_model})")
+        except Exception as e: st.error(f"Başlatma Hatası: {e}")
 
 # --- Sohbet Akışı ---
 if st.session_state.chat_session:
@@ -287,8 +256,6 @@ if st.session_state.chat_session:
             st.write(message["content"])
 
     # --- İPUCU VE GİRDİ ALANI ---
-    # İpucu butonunu ses/yazı alanının hemen üstüne koyuyoruz
-    
     # Sadece en son mesaj asistansa (yani soru sorulmuşsa) ipucu göster
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
         with st.expander("💡 Takıldınız mı? İpucu Alın"):
@@ -296,7 +263,7 @@ if st.session_state.chat_session:
                 with st.spinner("Koç soruyu analiz ediyor..."):
                     try:
                         # Yan Kanal İsteği (Ana sohbeti kirletmez)
-                        coach_model = genai.GenerativeModel(st.session_state.active_model_name)
+                        coach_model = genai.GenerativeModel(selected_model) # Seçilen modeli kullanır
                         last_question = st.session_state.messages[-1]["content"]
                         
                         hint_prompt = f"""
@@ -306,129 +273,4 @@ if st.session_state.chat_session:
                         """
                         hint_response = coach_model.generate_content(hint_prompt)
                         st.info(f"🔑 **İpucu:** {hint_response.text}")
-                    except Exception as e:
-                        st.warning("İpucu şu an oluşturulamadı.")
-
-    col_mic, col_text = st.columns([1, 5])
-    
-    audio_bytes = None
-    recorder = get_audio_recorder()
-    if recorder:
-        with col_mic:
-            audio_bytes = recorder(text="", recording_color="#e8b62c", neutral_color="#6aa36f", icon_name="microphone", icon_size="2x")
-    
-    user_input = None
-    if audio_bytes and audio_bytes != st.session_state.last_audio_bytes:
-        if not st.session_state.finish_requested:
-            st.session_state.last_audio_bytes = audio_bytes
-            with st.spinner("Ses işleniyor..."):
-                user_input = speech_to_text(audio_bytes)
-                if user_input: st.info(f"🎤 {user_input}")
-
-    text_input = st.chat_input("Cevabın...")
-    if text_input: user_input = text_input
-
-    if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        if text_input:
-            with st.chat_message("user"): st.write(user_input)
-
-        with st.spinner("..."):
-            try:
-                if st.session_state.messages[-1]["role"] != "assistant":
-                    response = st.session_state.chat_session.send_message(user_input)
-                    ai_text = response.text
-                    st.session_state.messages.append({"role": "assistant", "content": ai_text})
-                    
-                    with st.chat_message("assistant"):
-                        st.write(ai_text)
-                        audio_path = text_to_speech(ai_text)
-                        if audio_path: st.audio(audio_path, format="audio/mp3", autoplay=True)
-            except Exception as e: st.error(f"Hata: {e}")
-
-# --- Raporlama (REGEX) ---
-if st.session_state.finish_requested and st.session_state.chat_session:
-    with st.spinner("Analiz ediliyor..."):
-        max_retries = 3
-        retry_count = 0
-        success = False
-        
-        while retry_count < max_retries and not success:
-            try:
-                report_prompt = """
-                MÜLAKAT BİTTİ. Detaylı analiz yap.
-                🚨 KURAL: EĞER ADAY CEVAP VERMEDİYSE ("...", "bilmem") PUAN 0 OLSUN.
-                FORMAT:
-                SKOR: (0-100 arası sadece sayı)
-                KARAR: (Olumlu / Olumsuz)
-                -- PUAN DETAYLARI --
-                TEKNİK: (0-100)
-                İLETİŞİM: (0-100)
-                PROBLEM_ÇÖZME: (0-100)
-                TEORİK_BİLGİ: (0-100)
-                POTANSİYEL: (0-100)
-                -- SÖZEL RAPOR --
-                (Kısa bir özet yaz)
-                """
-                response = st.session_state.chat_session.send_message(report_prompt)
-                full_text = response.text
-                success = True
-            except Exception as e:
-                if "429" in str(e):
-                    retry_count += 1
-                    time.sleep(10)
-                else: break
-
-        if success:
-            score = 0
-            decision = "Belirsiz"
-            
-            score_match = re.search(r"SKOR[:\s*]*(\d+)", full_text, re.IGNORECASE)
-            if score_match: score = int(score_match.group(1))
-            
-            decision_match = re.search(r"KARAR[:\s*]*(.+)", full_text, re.IGNORECASE)
-            if decision_match: decision = decision_match.group(1).strip()
-
-            categories = ["TEKNİK", "İLETİŞİM", "PROBLEM_ÇÖZME", "TEORİK_BİLGİ", "POTANSİYEL"]
-            values = []
-            for cat in categories:
-                cat_match = re.search(rf"{cat}[:\s*]*(\d+)", full_text, re.IGNORECASE)
-                if cat_match: values.append(int(cat_match.group(1)))
-                else: values.append(50)
-            
-            try: verbal_report = full_text.split("-- SÖZEL RAPOR --")[1]
-            except: verbal_report = full_text
-
-            st.session_state.report_data = {
-                "score": score,
-                "decision": decision,
-                "categories": categories,
-                "values": values,
-                "text": verbal_report
-            }
-            st.session_state.finish_requested = False
-            st.rerun()
-        else:
-            st.error("Rapor oluşturulamadı.")
-
-# --- EKRAN: Rapor ve PDF ---
-if st.session_state.report_data:
-    data = st.session_state.report_data
-    st.markdown("---")
-    st.header("📊 Mülakat Sonuç Karnesi")
-    c1, c2 = st.columns(2)
-    c1.metric("Genel Puan", f"{data['score']}/100")
-    if "Olumlu" in data['decision']: c2.success(f"Karar: {data['decision']}")
-    else: c2.error(f"Karar: {data['decision']}")
-    st.progress(data['score'])
-    col_chart, col_text = st.columns([1, 1])
-    with col_chart:
-        fig = go.Figure(data=go.Scatterpolar(r=data['values'], theta=data['categories'], fill='toself', name='Aday'))
-        fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
-    with col_text:
-        st.info(data['text'])
-        try:
-            pdf_bytes = create_pdf_report(data)
-            st.download_button(label="📄 Raporu İndir (PDF)", data=pdf_bytes, file_name="mulakat_karnesi.pdf", mime="application/pdf")
-        except Exception as e: st.error(f"PDF Hatası: {e}")
+                    except Exception as e
