@@ -142,7 +142,7 @@ def get_pdf_text(pdf_file):
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Ayarlar")
-    api_key = st.text_input("Google API Key", type="password")
+    api_key = st.text_input("Google API Key", value="AIzaSyBvM2WidQqKe0zcf1mxAtM3Edzqih2Hkdc")
     
     # --- GARANTİ MODEL LİSTESİ ---
     # Otomatik arama hata verdiği için manuel listeye döndük.
@@ -396,3 +396,4 @@ if st.session_state.report_data:
             pdf_bytes = create_pdf_report(data)
             st.download_button(label="📄 Raporu İndir (PDF)", data=pdf_bytes, file_name="mulakat_karnesi.pdf", mime="application/pdf")
         except Exception as e: st.error(f"PDF Hatası: {e}")
+
