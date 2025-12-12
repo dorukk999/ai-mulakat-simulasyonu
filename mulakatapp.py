@@ -9,25 +9,9 @@ import requests
 import tempfile
 import re
 
-# ==========================================
-# 🚨 BURAYI DOLDUR (Şifreni tırnak içine yapıştır)
-# ==========================================
-API_KEY = "AIzaSyBvM2WidQqKe0zcf1mxAtM3Edzqih2Hkdc"  # <--- BURAYA YAPIŞTIR
-# ==========================================
-
-# --- Sabit Model Ayarı ---
-# Sunum için en güvenli, en hızlı ve kotası bol model:
-SELECTED_MODEL = "gemini-1.5-flash" 
-
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
 st.title("🤖 AI Mülakat Simülasyonu")
-
-# --- KONFİGÜRASYON (EN BAŞTA YAPILIYOR) ---
-try:
-    genai.configure(api_key=API_KEY)
-except Exception as e:
-    st.error(f"API Key Hatası: {e}")
 
 # --- 1. FONKSİYONLAR ---
 def check_and_download_fonts():
@@ -50,6 +34,7 @@ def tr_to_en(text):
     for tr, en in tr_map.items(): text = text.replace(tr, en)
     return text
 
+# --- GÜVENLİ SES FONKSİYONLARI ---
 def get_audio_recorder():
     try:
         from audio_recorder_streamlit import audio_recorder
@@ -145,18 +130,51 @@ def create_pdf_report(data):
         pdf_bytes = tmp_file.read()
     return pdf_bytes
 
-def get_pdf_text(pdf_file):
-    text = ""
-    try:
-        reader = PdfReader(pdf_file)
-        for page in reader.pages: text += page.extract_text()
-    except: pass
-    return text
-
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Ayarlar")
-    st.success(f"✅ Sistem Bağlı (Model: {SELECTED_MODEL})")
+    api_key = st.text_input("Google API Key", type="password")
+    
+    # --- MODEL BULUCU (OTOMATİK VE GARANTİLİ) ---
+    working_model_name = None
+    
+    if api_key:
+        try:
+            genai.configure(api_key=api_key)
+            
+            # 1. Önce En İyileri Dene (Hardcoded)
+            # Bu isimler Google'ın standartlarıdır.
+            priority_models = [
+                "gemini-1.5-flash",
+                "gemini-1.5-flash-latest",
+                "gemini-1.0-pro",
+                "gemini-pro"
+            ]
+            
+            # Google'a "Sendeki modelleri ver" diyelim
+            try:
+                all_models = genai.list_models()
+                for m in all_models:
+                    if 'generateContent' in m.supported_generation_methods:
+                        # Eğer listedeki model bizim öncelikli listemizde varsa onu kap
+                        # Yoksa da 'flash' veya 'pro' olanı al
+                        if "flash" in m.name:
+                            working_model_name = m.name # models/gemini-1.5-flash-001 gibi gelir
+                            break
+            except: pass
+
+            # Eğer listeden bulamazsak, manuel listeden deneyelim
+            if not working_model_name:
+                for pm in priority_models:
+                    working_model_name = pm # Geçici ata
+                    break 
+
+        except: st.error("API Key Hatalı")
+    
+    if working_model_name:
+        st.success(f"✅ Aktif Model: {working_model_name.replace('models/', '')}")
+    elif api_key:
+        st.warning("Model aranıyor...")
 
     with st.form("main_form"):
         st.info("Mülakat Detayları")
@@ -169,6 +187,15 @@ with st.sidebar:
     if st.session_state.get('chat_session'):
         if st.button("🏁 Mülakatı Bitir ve Raporla", type="primary"):
             st.session_state['finish_requested'] = True
+
+# --- Fonksiyonlar ---
+def get_pdf_text(pdf_file):
+    text = ""
+    try:
+        reader = PdfReader(pdf_file)
+        for page in reader.pages: text += page.extract_text()
+    except: pass
+    return text
 
 # --- Hafıza ---
 if "messages" not in st.session_state: st.session_state.messages = [] 
@@ -187,12 +214,12 @@ safety_settings = [
 
 # --- Mülakat Başlatma ---
 if start_interview:
-    if not cv_file:
-        st.error("Lütfen CV yükleyin.")
+    if not api_key or not cv_file:
+        st.error("Eksik bilgi.")
     else:
         st.session_state.report_data = None
         st.session_state.last_audio_bytes = None
-        
+        genai.configure(api_key=api_key)
         cv_text = get_pdf_text(cv_file)
         portfolio_text = ""
         if portfolio_files:
@@ -219,6 +246,7 @@ if start_interview:
             ADIM 2: YETKİNLİK SORGULAMA STRATEJİSİ (CBI - Competency Based Interviewing)
             - Adayın beyanlarını asla yüzeyden kabul etme. "Derinlemesine Sorgulama" (Deep-Dive) yap.
             - STAR Metodolojisi Entegrasyonu (Implicit Guidance): Adaya doğrudan "STAR kullan" demek yerine, sorularınla onu yönlendir.
+              (Örn: "Bu projede karşılaştığın spesifik Zorluk (S) neydi?", "Tam olarak senin Görevin (T/A) neydi?", "Sonuç (R) ne oldu?" şeklinde parçalı sorular sor.)
             - Tutarlılık Analizi: CV'deki iddialar ile sohbet sırasındaki cevaplar arasındaki tutarsızlıkları yakala.
             
             ADIM 3: SENARYO BAZLI TEST (SITUATIONAL JUDGEMENT)
@@ -233,9 +261,10 @@ if start_interview:
             === BAŞLATMA ===
             Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
             """
+            # Otomatik bulunan modeli kullan
+            final_model_name = working_model_name if working_model_name else "gemini-1.5-flash"
             
-            # --- MODELİ BURADA ÇAĞIRIYORUZ (SABİT) ---
-            model = genai.GenerativeModel(model_name=SELECTED_MODEL, safety_settings=safety_settings)
+            model = genai.GenerativeModel(model_name=final_model_name, safety_settings=safety_settings)
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
             
@@ -243,8 +272,8 @@ if start_interview:
             response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
             
             st.session_state.messages = [{"role": "assistant", "content": response.text}]
-            st.success("Başladı!")
-        except Exception as e: st.error(f"Başlatma Hatası: {e}")
+            st.success(f"Başladı! (Model: {final_model_name})")
+        except Exception as e: st.error(f"Hata: {e}")
 
 # --- Sohbet Akışı ---
 if st.session_state.chat_session:
@@ -253,21 +282,9 @@ if st.session_state.chat_session:
         with st.chat_message(role):
             st.write(message["content"])
 
-    # --- İPUCU VE GİRDİ ALANI ---
-    if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
-        with st.expander("💡 Takıldınız mı? İpucu Alın"):
-            if st.button("AI Koçundan Yardım İste"):
-                with st.spinner("Koç soruyu analiz ediyor..."):
-                    try:
-                        coach_model = genai.GenerativeModel(SELECTED_MODEL) 
-                        last_question = st.session_state.messages[-1]["content"]
-                        hint_prompt = f"Adaya şu soru için cevabı söylemeden bir ipucu ver: {last_question}"
-                        hint_response = coach_model.generate_content(hint_prompt)
-                        st.info(f"🔑 **İpucu:** {hint_response.text}")
-                    except: st.warning("İpucu alınamadı.")
-
     col_mic, col_text = st.columns([1, 5])
     
+    # GÜVENLİ MİKROFON ÇAĞRISI
     audio_bytes = None
     recorder = get_audio_recorder()
     if recorder:
@@ -389,3 +406,4 @@ if st.session_state.report_data:
             pdf_bytes = create_pdf_report(data)
             st.download_button(label="📄 Raporu İndir (PDF)", data=pdf_bytes, file_name="mulakat_karnesi.pdf", mime="application/pdf")
         except Exception as e: st.error(f"PDF Hatası: {e}")
+
