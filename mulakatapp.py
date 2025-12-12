@@ -143,52 +143,37 @@ if "chat_session" not in st.session_state: st.session_state.chat_session = None
 if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
 if "report_data" not in st.session_state: st.session_state.report_data = None 
 if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
-# En kritik değişken: Çalışan model ismi
-if "safe_model_name" not in st.session_state: st.session_state.safe_model_name = None
+# Seçilen modeli hafızada tut
+if "active_model_name" not in st.session_state: st.session_state.active_model_name = "gemini-1.5-flash"
 
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Ayarlar")
-    api_key = st.text_input("Google API Key", type="password")
     
-    # --- AKILLI MODEL SEÇİCİ (WATERFALL) ---
-    # Bu blok, API Key girildiği an çalışır ve modelleri dener.
-    if api_key and not st.session_state.safe_model_name:
-        genai.configure(api_key=api_key)
-        
-        # SADECE YÜKSEK KOTALI MODELLERİ DENER (2.5 Yok!)
-        candidate_models = [
-            "gemini-1.5-flash",          # Öncelik 1
-            "gemini-1.5-flash-latest",   # Öncelik 2
-            "models/gemini-1.5-flash",   # Öncelik 3
-            "gemini-1.5-pro",            # Öncelik 4
-            "gemini-1.0-pro",            # Öncelik 5
-            "gemini-pro"                 # Can simidi (Her zaman çalışır)
-        ]
-        
-        found = False
-        with st.spinner("Sunucuya uygun model aranıyor..."):
-            for model_name in candidate_models:
-                try:
-                    # Test atışı yap (Sadece 'Merhaba' de)
-                    m = genai.GenerativeModel(model_name)
-                    m.generate_content("Test")
-                    
-                    # Eğer hata vermediyse bu modeli tut
-                    st.session_state.safe_model_name = model_name
-                    found = True
-                    break # Döngüden çık
-                except:
-                    continue # Hata verdiyse sıradakine geç
-        
-        if not found:
-            st.error("❌ Hiçbir model çalışmadı. API Key'inizi veya kotanızı kontrol edin.")
+    # 1. API KEY GİRİŞİ
+    api_key_input = st.text_input("Google API Key", type="password")
+    
+    # 2. MODEL LİSTESİ (HEPSİ VAR)
+    # Sunucu hangisini severse onu seçebilmen için hepsini koydum.
+    model_options = [
+        "gemini-1.5-flash",          # EN İYİSİ (Varsayılan)
+        "gemini-1.5-flash-latest",   
+        "models/gemini-1.5-flash",   
+        "gemini-1.5-pro",            
+        "gemini-1.0-pro",
+        "gemini-pro"                 # EN ESKİ (Garanti çalışır)
+    ]
+    
+    selected_model_ui = st.selectbox("Model Seçimi", model_options, index=0)
 
-    # Bağlantı Durumu Göstergesi
-    if st.session_state.safe_model_name:
-        st.success(f"✅ Bağlandı: {st.session_state.safe_model_name}")
-    elif api_key:
-        st.warning("Model bulunamadı.")
+    # API Yapılandırması
+    if api_key_input:
+        try:
+            # Boşlukları temizle
+            clean_key = api_key_input.strip()
+            genai.configure(api_key=clean_key)
+            st.success("API Key Formatı Doğru")
+        except: pass
 
     with st.form("main_form"):
         st.info("Mülakat Detayları")
@@ -212,14 +197,15 @@ safety_settings = [
 
 # --- Mülakat Başlatma ---
 if start_interview:
-    if not api_key or not cv_file:
-        st.error("Eksik bilgi.")
-    elif not st.session_state.safe_model_name:
-        st.error("Lütfen önce geçerli bir API Key girin ve modelin bağlanmasını bekleyin.")
+    if not api_key_input or not cv_file:
+        st.error("Lütfen API Key girin ve CV yükleyin.")
     else:
         st.session_state.report_data = None
         st.session_state.last_audio_bytes = None
-        genai.configure(api_key=api_key)
+        
+        # Seçilen modeli kaydet
+        st.session_state.active_model_name = selected_model_ui
+        
         cv_text = get_pdf_text(cv_file)
         portfolio_text = ""
         if portfolio_files:
@@ -261,8 +247,8 @@ if start_interview:
             Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
             """
             
-            # BULUNAN GÜVENLİ MODELİ KULLAN
-            model = genai.GenerativeModel(model_name=st.session_state.safe_model_name, safety_settings=safety_settings)
+            # Seçilen modeli kullanarak başlat
+            model = genai.GenerativeModel(model_name=st.session_state.active_model_name, safety_settings=safety_settings)
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
             
@@ -270,8 +256,10 @@ if start_interview:
             response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
             
             st.session_state.messages = [{"role": "assistant", "content": response.text}]
-            st.success(f"Başladı! (Model: {st.session_state.safe_model_name})")
-        except Exception as e: st.error(f"Başlatma Hatası: {e}")
+            st.success(f"Başladı! (Model: {st.session_state.active_model_name})")
+        except Exception as e: 
+            st.error(f"Başlatma Hatası: {e}")
+            st.warning("⚠️ Lütfen sol menüden farklı bir model seçip tekrar deneyin.")
 
 # --- Sohbet Akışı ---
 if st.session_state.chat_session:
@@ -280,14 +268,15 @@ if st.session_state.chat_session:
         with st.chat_message(role):
             st.write(message["content"])
 
-    # --- İPUCU ALANI (YAN KANAL) ---
+    # --- İPUCU ALANI ---
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
         with st.expander("💡 Takıldınız mı? İpucu Alın"):
             if st.button("AI Koçundan Yardım İste"):
                 with st.spinner("Koç soruyu analiz ediyor..."):
                     try:
-                        # Ana mülakatla aynı modeli kullan
-                        coach_model = genai.GenerativeModel(st.session_state.safe_model_name)
+                        # Mülakatla aynı modeli kullan
+                        hint_model_name = st.session_state.get('active_model_name', 'gemini-1.5-flash')
+                        coach_model = genai.GenerativeModel(hint_model_name)
                         last_question = st.session_state.messages[-1]["content"]
                         hint_prompt = f"Adaya şu soru için cevabı söylemeden bir ipucu ver: {last_question}"
                         hint_response = coach_model.generate_content(hint_prompt)
@@ -332,88 +321,3 @@ if st.session_state.chat_session:
             except Exception as e: st.error(f"Hata: {e}")
 
 # --- Raporlama (REGEX) ---
-if st.session_state.finish_requested and st.session_state.chat_session:
-    with st.spinner("Analiz ediliyor..."):
-        max_retries = 3
-        retry_count = 0
-        success = False
-        
-        while retry_count < max_retries and not success:
-            try:
-                report_prompt = """
-                MÜLAKAT BİTTİ. Detaylı analiz yap.
-                🚨 KURAL: EĞER ADAY CEVAP VERMEDİYSE ("...", "bilmem") PUAN 0 OLSUN.
-                FORMAT:
-                SKOR: (0-100 arası sadece sayı)
-                KARAR: (Olumlu / Olumsuz)
-                -- PUAN DETAYLARI --
-                TEKNİK: (0-100)
-                İLETİŞİM: (0-100)
-                PROBLEM_ÇÖZME: (0-100)
-                TEORİK_BİLGİ: (0-100)
-                POTANSİYEL: (0-100)
-                -- SÖZEL RAPOR --
-                (Kısa bir özet yaz)
-                """
-                response = st.session_state.chat_session.send_message(report_prompt)
-                full_text = response.text
-                success = True
-            except Exception as e:
-                if "429" in str(e):
-                    retry_count += 1
-                    time.sleep(10)
-                else: break
-
-        if success:
-            score = 0
-            decision = "Belirsiz"
-            
-            score_match = re.search(r"SKOR[:\s*]*(\d+)", full_text, re.IGNORECASE)
-            if score_match: score = int(score_match.group(1))
-            
-            decision_match = re.search(r"KARAR[:\s*]*(.+)", full_text, re.IGNORECASE)
-            if decision_match: decision = decision_match.group(1).strip()
-
-            categories = ["TEKNİK", "İLETİŞİM", "PROBLEM_ÇÖZME", "TEORİK_BİLGİ", "POTANSİYEL"]
-            values = []
-            for cat in categories:
-                cat_match = re.search(rf"{cat}[:\s*]*(\d+)", full_text, re.IGNORECASE)
-                if cat_match: values.append(int(cat_match.group(1)))
-                else: values.append(50)
-            
-            try: verbal_report = full_text.split("-- SÖZEL RAPOR --")[1]
-            except: verbal_report = full_text
-
-            st.session_state.report_data = {
-                "score": score,
-                "decision": decision,
-                "categories": categories,
-                "values": values,
-                "text": verbal_report
-            }
-            st.session_state.finish_requested = False
-            st.rerun()
-        else:
-            st.error("Rapor oluşturulamadı.")
-
-# --- EKRAN: Rapor ve PDF ---
-if st.session_state.report_data:
-    data = st.session_state.report_data
-    st.markdown("---")
-    st.header("📊 Mülakat Sonuç Karnesi")
-    c1, c2 = st.columns(2)
-    c1.metric("Genel Puan", f"{data['score']}/100")
-    if "Olumlu" in data['decision']: c2.success(f"Karar: {data['decision']}")
-    else: c2.error(f"Karar: {data['decision']}")
-    st.progress(data['score'])
-    col_chart, col_text = st.columns([1, 1])
-    with col_chart:
-        fig = go.Figure(data=go.Scatterpolar(r=data['values'], theta=data['categories'], fill='toself', name='Aday'))
-        fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
-    with col_text:
-        st.info(data['text'])
-        try:
-            pdf_bytes = create_pdf_report(data)
-            st.download_button(label="📄 Raporu İndir (PDF)", data=pdf_bytes, file_name="mulakat_karnesi.pdf", mime="application/pdf")
-        except Exception as e: st.error(f"PDF Hatası: {e}")
