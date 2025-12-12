@@ -143,7 +143,6 @@ with st.sidebar:
             genai.configure(api_key=api_key)
             
             # 1. Önce En İyileri Dene (Hardcoded)
-            # Bu isimler Google'ın standartlarıdır.
             priority_models = [
                 "gemini-1.5-flash",
                 "gemini-1.5-flash-latest",
@@ -156,17 +155,16 @@ with st.sidebar:
                 all_models = genai.list_models()
                 for m in all_models:
                     if 'generateContent' in m.supported_generation_methods:
-                        # Eğer listedeki model bizim öncelikli listemizde varsa onu kap
-                        # Yoksa da 'flash' veya 'pro' olanı al
+                        # Flash modellerini önceliklendir
                         if "flash" in m.name:
-                            working_model_name = m.name # models/gemini-1.5-flash-001 gibi gelir
+                            working_model_name = m.name 
                             break
             except: pass
 
             # Eğer listeden bulamazsak, manuel listeden deneyelim
             if not working_model_name:
                 for pm in priority_models:
-                    working_model_name = pm # Geçici ata
+                    working_model_name = pm 
                     break 
 
         except: st.error("API Key Hatalı")
@@ -203,6 +201,8 @@ if "chat_session" not in st.session_state: st.session_state.chat_session = None
 if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
 if "report_data" not in st.session_state: st.session_state.report_data = None 
 if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
+# YENİ: Çalışan modeli hafızada tutalım ki Hint özelliği de aynısını kullansın
+if "active_model" not in st.session_state: st.session_state.active_model = None
 
 # --- Güvenlik ---
 safety_settings = [
@@ -264,6 +264,9 @@ if start_interview:
             # Otomatik bulunan modeli kullan
             final_model_name = working_model_name if working_model_name else "gemini-1.5-flash"
             
+            # Modeli hafızaya atalım (İpucu özelliği için)
+            st.session_state.active_model = final_model_name
+            
             model = genai.GenerativeModel(model_name=final_model_name, safety_settings=safety_settings)
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
@@ -281,6 +284,28 @@ if st.session_state.chat_session:
         role = "user" if message["role"] == "user" else "assistant"
         with st.chat_message(role):
             st.write(message["content"])
+
+    # --- İPUCU ÖZELLİĞİ (YENİ EKLENDİ) ---
+    # Sadece en son mesaj asistansa (yani soru sorulmuşsa) ipucu göster
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
+        with st.expander("💡 Takıldınız mı? İpucu Alın"):
+            if st.button("AI Koçundan Yardım İste"):
+                with st.spinner("Koç soruyu analiz ediyor..."):
+                    try:
+                        # Mülakatı başlatan aynı modeli kullanıyoruz
+                        hint_model_name = st.session_state.get('active_model', 'gemini-1.5-flash')
+                        coach_model = genai.GenerativeModel(hint_model_name)
+                        
+                        last_question = st.session_state.messages[-1]["content"]
+                        hint_prompt = f"""
+                        GÖREV: Sen yardımcı bir mülakat koçusun.
+                        DURUM: Aday şu soruya cevap vermekte zorlandı: "{last_question}"
+                        YAPMAN GEREKEN: Cevabı ASLA söyleme. Sadece adayın düşünmesini tetikleyecek, yolu gösteren kısa ve zekice bir ipucu ver.
+                        """
+                        hint_response = coach_model.generate_content(hint_prompt)
+                        st.info(f"🔑 **İpucu:** {hint_response.text}")
+                    except Exception as e:
+                        st.warning("İpucu şu an oluşturulamadı.")
 
     col_mic, col_text = st.columns([1, 5])
     
@@ -406,4 +431,3 @@ if st.session_state.report_data:
             pdf_bytes = create_pdf_report(data)
             st.download_button(label="📄 Raporu İndir (PDF)", data=pdf_bytes, file_name="mulakat_karnesi.pdf", mime="application/pdf")
         except Exception as e: st.error(f"PDF Hatası: {e}")
-
