@@ -130,49 +130,35 @@ def create_pdf_report(data):
         pdf_bytes = tmp_file.read()
     return pdf_bytes
 
+def get_pdf_text(pdf_file):
+    text = ""
+    try:
+        reader = PdfReader(pdf_file)
+        for page in reader.pages: text += page.extract_text()
+    except: pass
+    return text
+
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google API Key", type="password")
     
-    # --- MODEL BULUCU (OTOMATİK VE GARANTİLİ) ---
-    working_model_name = None
+    # --- MODEL SEÇİMİ (KOTA DOSTU LİSTE) ---
+    # 2.5 ve Experimental modelleri kaldırdık. Sadece yüksek kotalılar var.
+    model_options = [
+        "gemini-1.5-flash",          # EN İYİSİ (1500 İstek/Gün)
+        "gemini-1.5-flash-latest",   
+        "gemini-1.5-pro",            
+        "gemini-1.0-pro"             # YEDEK
+    ]
     
     if api_key:
         try:
             genai.configure(api_key=api_key)
-            
-            # 1. Önce En İyileri Dene (Hardcoded)
-            priority_models = [
-                "gemini-1.5-flash",
-                "gemini-1.5-flash-latest",
-                "gemini-1.0-pro",
-                "gemini-pro"
-            ]
-            
-            # Google'a "Sendeki modelleri ver" diyelim
-            try:
-                all_models = genai.list_models()
-                for m in all_models:
-                    if 'generateContent' in m.supported_generation_methods:
-                        # Flash modellerini önceliklendir
-                        if "flash" in m.name:
-                            working_model_name = m.name 
-                            break
-            except: pass
+        except: pass
 
-            # Eğer listeden bulamazsak, manuel listeden deneyelim
-            if not working_model_name:
-                for pm in priority_models:
-                    working_model_name = pm 
-                    break 
-
-        except: st.error("API Key Hatalı")
-    
-    if working_model_name:
-        st.success(f"✅ Aktif Model: {working_model_name.replace('models/', '')}")
-    elif api_key:
-        st.warning("Model aranıyor...")
+    # Kullanıcı buradan seçecek. Varsayılan: 1.5 Flash
+    selected_model = st.selectbox("Model Seçimi", model_options, index=0)
 
     with st.form("main_form"):
         st.info("Mülakat Detayları")
@@ -186,23 +172,12 @@ with st.sidebar:
         if st.button("🏁 Mülakatı Bitir ve Raporla", type="primary"):
             st.session_state['finish_requested'] = True
 
-# --- Fonksiyonlar ---
-def get_pdf_text(pdf_file):
-    text = ""
-    try:
-        reader = PdfReader(pdf_file)
-        for page in reader.pages: text += page.extract_text()
-    except: pass
-    return text
-
 # --- Hafıza ---
 if "messages" not in st.session_state: st.session_state.messages = [] 
 if "chat_session" not in st.session_state: st.session_state.chat_session = None 
 if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
 if "report_data" not in st.session_state: st.session_state.report_data = None 
 if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
-# YENİ: Çalışan modeli hafızada tutalım ki Hint özelliği de aynısını kullansın
-if "active_model" not in st.session_state: st.session_state.active_model = None
 
 # --- Güvenlik ---
 safety_settings = [
@@ -246,7 +221,6 @@ if start_interview:
             ADIM 2: YETKİNLİK SORGULAMA STRATEJİSİ (CBI - Competency Based Interviewing)
             - Adayın beyanlarını asla yüzeyden kabul etme. "Derinlemesine Sorgulama" (Deep-Dive) yap.
             - STAR Metodolojisi Entegrasyonu (Implicit Guidance): Adaya doğrudan "STAR kullan" demek yerine, sorularınla onu yönlendir.
-              (Örn: "Bu projede karşılaştığın spesifik Zorluk (S) neydi?", "Tam olarak senin Görevin (T/A) neydi?", "Sonuç (R) ne oldu?" şeklinde parçalı sorular sor.)
             - Tutarlılık Analizi: CV'deki iddialar ile sohbet sırasındaki cevaplar arasındaki tutarsızlıkları yakala.
             
             ADIM 3: SENARYO BAZLI TEST (SITUATIONAL JUDGEMENT)
@@ -261,13 +235,7 @@ if start_interview:
             === BAŞLATMA ===
             Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
             """
-            # Otomatik bulunan modeli kullan
-            final_model_name = working_model_name if working_model_name else "gemini-1.5-flash"
-            
-            # Modeli hafızaya atalım (İpucu özelliği için)
-            st.session_state.active_model = final_model_name
-            
-            model = genai.GenerativeModel(model_name=final_model_name, safety_settings=safety_settings)
+            model = genai.GenerativeModel(model_name=selected_model, safety_settings=safety_settings)
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
             
@@ -275,7 +243,7 @@ if start_interview:
             response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
             
             st.session_state.messages = [{"role": "assistant", "content": response.text}]
-            st.success(f"Başladı! (Model: {final_model_name})")
+            st.success(f"Başladı! (Model: {selected_model})")
         except Exception as e: st.error(f"Hata: {e}")
 
 # --- Sohbet Akışı ---
@@ -285,17 +253,14 @@ if st.session_state.chat_session:
         with st.chat_message(role):
             st.write(message["content"])
 
-    # --- İPUCU ÖZELLİĞİ (YENİ EKLENDİ) ---
-    # Sadece en son mesaj asistansa (yani soru sorulmuşsa) ipucu göster
+    # --- İPUCU VE GİRDİ ALANI ---
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
         with st.expander("💡 Takıldınız mı? İpucu Alın"):
             if st.button("AI Koçundan Yardım İste"):
                 with st.spinner("Koç soruyu analiz ediyor..."):
                     try:
                         # Mülakatı başlatan aynı modeli kullanıyoruz
-                        hint_model_name = st.session_state.get('active_model', 'gemini-1.5-flash')
-                        coach_model = genai.GenerativeModel(hint_model_name)
-                        
+                        coach_model = genai.GenerativeModel(selected_model)
                         last_question = st.session_state.messages[-1]["content"]
                         hint_prompt = f"""
                         GÖREV: Sen yardımcı bir mülakat koçusun.
@@ -305,11 +270,10 @@ if st.session_state.chat_session:
                         hint_response = coach_model.generate_content(hint_prompt)
                         st.info(f"🔑 **İpucu:** {hint_response.text}")
                     except Exception as e:
-                        st.warning("İpucu şu an oluşturulamadı.")
+                        st.warning("İpucu şu an oluşturulamadı (Kota veya Bağlantı).")
 
     col_mic, col_text = st.columns([1, 5])
     
-    # GÜVENLİ MİKROFON ÇAĞRISI
     audio_bytes = None
     recorder = get_audio_recorder()
     if recorder:
