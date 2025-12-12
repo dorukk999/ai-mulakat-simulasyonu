@@ -1,4 +1,4 @@
-google-generativeai>=0.8.3
+google-generativeai==0.8.3
 streamlit
 pypdf
 plotly
@@ -6,3 +6,4 @@ fpdf
 audio-recorder-streamlit
 gTTS
 SpeechRecognition
+
