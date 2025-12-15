@@ -8,7 +8,8 @@ import os
 import requests
 import tempfile
 import re
-from streamlit_mic_recorder import mic_recorder # YENİ EKLENDİ
+# DEĞİŞİKLİK BURADA: mic_recorder yerine speech_to_text çağırdık
+from streamlit_mic_recorder import speech_to_text 
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
@@ -34,23 +35,6 @@ def tr_to_en(text):
     tr_map = {'ğ':'g','Ğ':'G','ş':'s','Ş':'S','ı':'i','İ':'I','ç':'c','Ç':'C','ü':'u','Ü':'U','ö':'o','Ö':'O'}
     for tr, en in tr_map.items(): text = text.replace(tr, en)
     return text
-
-# Eski get_audio_recorder fonksiyonunu kaldırdık, artık gerek yok.
-
-def speech_to_text(audio_bytes):
-    try:
-        import speech_recognition as sr 
-        r = sr.Recognizer()
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
-            tmp_audio.write(audio_bytes)
-            tmp_path = tmp_audio.name
-        
-        with sr.AudioFile(tmp_path) as source:
-            audio_data = r.record(source)
-            text = r.recognize_google(audio_data, language="tr-TR")
-        os.remove(tmp_path)
-        return text
-    except Exception as e: return None
 
 def text_to_speech(text):
     try:
@@ -139,12 +123,10 @@ if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_session" not in st.session_state: st.session_state.chat_session = None 
 if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
 if "report_data" not in st.session_state: st.session_state.report_data = None 
-if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
 if "fetched_models" not in st.session_state: st.session_state.fetched_models = []
 
 # --- Sidebar ---
 with st.sidebar:
-    # LOGO EKLEME KISMI
     try:
         st.image("logo2.jpg", width=250) 
     except:
@@ -152,10 +134,8 @@ with st.sidebar:
 
     st.header("⚙️ Ayarlar")
     
-    # API Key Girişi
     api_key_input = st.text_input("Google API Key", type="password")
     
-    # --- GERÇEK ZAMANLI MODEL LİSTELEME ---
     if api_key_input:
         if not st.session_state.fetched_models:
             if st.button("🔄 Modelleri Getir (Bağlan)"):
@@ -165,10 +145,9 @@ with st.sidebar:
                     valid_models = []
                     for m in models:
                         if 'generateContent' in m.supported_generation_methods:
-                            valid_models.append(m.name) # Örn: models/gemini-1.5-flash
+                            valid_models.append(m.name)
                     
                     if valid_models:
-                        # Flash modellerini en başa al
                         valid_models.sort(key=lambda x: "flash" not in x)
                         st.session_state.fetched_models = valid_models
                         st.success("Modeller yüklendi!")
@@ -177,7 +156,6 @@ with st.sidebar:
                 except Exception as e:
                     st.error(f"Bağlantı hatası: {e}")
 
-    # Model Seçimi (API'den gelen liste veya varsayılan)
     options = st.session_state.fetched_models if st.session_state.fetched_models else ["models/gemini-1.5-flash", "gemini-1.5-flash"]
     selected_model_name = st.selectbox("Kullanılacak Model", options)
 
@@ -207,9 +185,7 @@ if start_interview:
         st.error("Eksik bilgi: API Key veya CV yok.")
     else:
         st.session_state.report_data = None
-        st.session_state.last_audio_bytes = None
         
-        # Konfigürasyonu kesinleştir
         genai.configure(api_key=api_key_input)
         
         cv_text = get_pdf_text(cv_file)
@@ -253,7 +229,22 @@ if start_interview:
             Analizini tamamla, belirlediğin kimliğe bürün, kendini profesyonelce tanıt ve CV/Portfolyo analizine dayalı en kritik ilk sorunu yönelt.
             """
             
-            # API'den seçilen modeli kullan (İsim hatası olamaz)
+            welcome_text = """
+            **👋 Mülakat Simülasyonuna Hoş Geldiniz!**
+
+            Bu mülakat, yapay zeka destekli bir simülasyon üzerinden gerçekleştirilecektir. Amaç, sizi tanımak ve deneyimlerinizi daha iyi anlayabilmektir; stres yaratmak değil.
+
+            ℹ️ **İşleyiş:**
+            * Mülakat sırasında sorulara ister **yazarak** ister **konuşarak** cevap verebilirsiniz.
+            * 🎤 **Mikrofon:** Butona bir kez bastığınızda kayıt başlar, tekrar bastığınızda kayıt durur. Tarayıcınız sesinizi otomatik olarak yazıya çevirecektir.
+            * ⏳ **Süre:** Her bir soru için maksimum 5 dakikalık bir süre bulunmaktadır.
+            * 💡 **İpucu:** Sorulara kendi deneyimlerinizi yansıtan, samimi ve açık cevaplar vermeniz yeterlidir.
+
+            *Not: Yapay zeka, insan kaynaklarının yerini almaz; yalnızca değerlendirme sürecini destekleyen bir araç olarak kullanılmaktadır.*
+            
+            **Size iyi bir mülakat deneyimi dileriz, başarılar! 🍀**
+            """
+
             model = genai.GenerativeModel(model_name=selected_model_name, safety_settings=safety_settings)
             chat = model.start_chat(history=[])
             st.session_state.chat_session = chat
@@ -261,7 +252,10 @@ if start_interview:
             chat.send_message(system_prompt)
             response = chat.send_message("ANALİZİNİ TAMAMLA VE MÜLAKATI BAŞLAT. Şimdi belirlenen kimliğe bürün, kendini tanıt ve adaya ilk sorunu sor.")
             
-            st.session_state.messages = [{"role": "assistant", "content": response.text}]
+            st.session_state.messages = [
+                {"role": "assistant", "content": welcome_text},
+                {"role": "assistant", "content": response.text}
+            ]
             st.success(f"Başladı! (Model: {selected_model_name})")
         except Exception as e: st.error(f"Başlatma Hatası: {e}")
 
@@ -272,13 +266,11 @@ if st.session_state.chat_session:
         with st.chat_message(role):
             st.write(message["content"])
 
-    # --- İPUCU VE GİRDİ ALANI ---
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
         with st.expander("💡 Takıldınız mı? İpucu Alın"):
             if st.button("AI Koçundan Yardım İste"):
                 with st.spinner("Koç soruyu analiz ediyor..."):
                     try:
-                        # Mülakatla aynı modeli kullan
                         coach_model = genai.GenerativeModel(selected_model_name)
                         last_question = st.session_state.messages[-1]["content"]
                         hint_prompt = f"Adaya şu soru için cevabı söylemeden bir ipucu ver: {last_question}"
@@ -288,26 +280,28 @@ if st.session_state.chat_session:
 
     col_mic, col_text = st.columns([1, 5])
     
-    # --- YENİ SES KAYIT ALANI (START / STOP) ---
+    # --- YENİ MİKROFON YAPISI ---
+    # Sesi Python'a değil, direkt yazıya çeviriyoruz (Daha hızlı ve hatasız)
+    
     user_input = None
     
     with col_mic:
-        st.write("Cevabını Kaydet:")
-        # YENİ KÜTÜPHANE KULLANIMI: Start/Stop Butonları
-        audio = mic_recorder(
+        st.write("Cevabını Konuş:")
+        # speech_to_text: Sesi alıp direkt string döner.
+        text_from_mic = speech_to_text(
+            language='tr',
             start_prompt="🎤 Başlat",
             stop_prompt="⏹️ Durdur",
-            key='recorder',
             just_once=True,
-            use_container_width=True
+            key='STT'
         )
     
-    if audio:
-        with st.spinner("Ses işleniyor..."):
-            user_input = speech_to_text(audio['bytes'])
-            if user_input: st.info(f"🎤 Algılanan: {user_input}")
+    # Eğer mikrofondan yazı geldiyse onu user_input yap
+    if text_from_mic:
+        user_input = text_from_mic
+        st.info(f"🎤 Algılanan: {user_input}")
 
-    text_input = st.chat_input("Cevabın...")
+    text_input = st.chat_input("Veya yazarak cevapla...")
     if text_input: user_input = text_input
 
     if user_input:
@@ -315,7 +309,7 @@ if st.session_state.chat_session:
         if text_input:
             with st.chat_message("user"): st.write(user_input)
 
-        with st.spinner("..."):
+        with st.spinner("Yapay Zeka düşünüyor..."):
             try:
                 if st.session_state.messages[-1]["role"] != "assistant":
                     response = st.session_state.chat_session.send_message(user_input)
@@ -328,7 +322,7 @@ if st.session_state.chat_session:
                         if audio_path: st.audio(audio_path, format="audio/mp3", autoplay=True)
             except Exception as e: st.error(f"Hata: {e}")
 
-# --- Raporlama (REGEX) ---
+# --- Raporlama ---
 if st.session_state.finish_requested and st.session_state.chat_session:
     with st.spinner("Analiz ediliyor..."):
         max_retries = 3
