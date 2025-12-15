@@ -8,7 +8,6 @@ import os
 import requests
 import tempfile
 import re
-# DEĞİŞİKLİK BURADA: mic_recorder yerine speech_to_text çağırdık
 from streamlit_mic_recorder import speech_to_text 
 
 # --- Sayfa Ayarları ---
@@ -124,6 +123,8 @@ if "chat_session" not in st.session_state: st.session_state.chat_session = None
 if "finish_requested" not in st.session_state: st.session_state.finish_requested = False
 if "report_data" not in st.session_state: st.session_state.report_data = None 
 if "fetched_models" not in st.session_state: st.session_state.fetched_models = []
+# [YENİ] Süre takibi için değişken
+if "question_start_time" not in st.session_state: st.session_state.question_start_time = None
 
 # --- Sidebar ---
 with st.sidebar:
@@ -237,7 +238,7 @@ if start_interview:
             ℹ️ **İşleyiş:**
             * Mülakat sırasında sorulara ister **yazarak** ister **konuşarak** cevap verebilirsiniz.
             * 🎤 **Mikrofon:** Butona bir kez bastığınızda kayıt başlar, tekrar bastığınızda kayıt durur. Tarayıcınız sesinizi otomatik olarak yazıya çevirecektir.
-            * ⏳ **Süre:** Her bir soru için maksimum 5 dakikalık bir süre bulunmaktadır.
+            * ⏳ **Süre:** Her bir soru için maksimum 5 dakikalık bir süre bulunmaktadır. **5 dakika içinde cevap vermezseniz sistem mülakatı sonlandıracaktır.**
             * 💡 **İpucu:** Sorulara kendi deneyimlerinizi yansıtan, samimi ve açık cevaplar vermeniz yeterlidir.
 
             *Not: Yapay zeka, insan kaynaklarının yerini almaz; yalnızca değerlendirme sürecini destekleyen bir araç olarak kullanılmaktadır.*
@@ -256,6 +257,10 @@ if start_interview:
                 {"role": "assistant", "content": welcome_text},
                 {"role": "assistant", "content": response.text}
             ]
+            
+            # [YENİ] Sayacı Başlat (İlk soru için)
+            st.session_state.question_start_time = time.time()
+            
             st.success(f"Başladı! (Model: {selected_model_name})")
         except Exception as e: st.error(f"Başlatma Hatası: {e}")
 
@@ -267,6 +272,9 @@ if st.session_state.chat_session:
             st.write(message["content"])
 
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
+        # Süre uyarısını göster
+        st.caption("⏳ Bu soruya cevap vermek için 5 dakikanız var.")
+        
         with st.expander("💡 Takıldınız mı? İpucu Alın"):
             if st.button("AI Koçundan Yardım İste"):
                 with st.spinner("Koç soruyu analiz ediyor..."):
@@ -280,14 +288,10 @@ if st.session_state.chat_session:
 
     col_mic, col_text = st.columns([1, 5])
     
-    # --- YENİ MİKROFON YAPISI ---
-    # Sesi Python'a değil, direkt yazıya çeviriyoruz (Daha hızlı ve hatasız)
-    
     user_input = None
     
     with col_mic:
         st.write("Cevabını Konuş:")
-        # speech_to_text: Sesi alıp direkt string döner.
         text_from_mic = speech_to_text(
             language='tr',
             start_prompt="🎤 Başlat",
@@ -296,7 +300,6 @@ if st.session_state.chat_session:
             key='STT'
         )
     
-    # Eğer mikrofondan yazı geldiyse onu user_input yap
     if text_from_mic:
         user_input = text_from_mic
         st.info(f"🎤 Algılanan: {user_input}")
@@ -304,27 +307,46 @@ if st.session_state.chat_session:
     text_input = st.chat_input("Veya yazarak cevapla...")
     if text_input: user_input = text_input
 
+    # --- SÜRE KONTROLÜ VE CEVAP İŞLEME ---
     if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        if text_input:
-            with st.chat_message("user"): st.write(user_input)
+        # 1. Süreyi Kontrol Et
+        current_time = time.time()
+        # Eğer start_time yoksa (örn. sayfa yeni açıldıysa) şimdiki zamanı alıp geç
+        start_time = st.session_state.get('question_start_time', current_time) 
+        elapsed_time = current_time - start_time
+        time_limit = 300  # 5 dakika = 300 saniye
 
-        with st.spinner("Yapay Zeka düşünüyor..."):
-            try:
-                if st.session_state.messages[-1]["role"] != "assistant":
-                    response = st.session_state.chat_session.send_message(user_input)
-                    ai_text = response.text
-                    st.session_state.messages.append({"role": "assistant", "content": ai_text})
-                    
-                    with st.chat_message("assistant"):
-                        st.write(ai_text)
-                        audio_path = text_to_speech(ai_text)
-                        if audio_path: st.audio(audio_path, format="audio/mp3", autoplay=True)
-            except Exception as e: st.error(f"Hata: {e}")
+        if elapsed_time > time_limit:
+            # SÜRE DOLDUYSA
+            st.error(f"⚠️ Süre Doldu! (Geçen süre: {int(elapsed_time/60)} dakika). Mülakat sonlandırılıyor.")
+            st.session_state.messages.append({"role": "user", "content": "Süre doldu, cevap veremedim."}) # Loglara düşsün
+            st.session_state.finish_requested = True
+            st.rerun()
+        else:
+            # SÜRE İÇİNDEYSE -> İşleme Devam Et
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            if text_input:
+                with st.chat_message("user"): st.write(user_input)
+
+            with st.spinner("Yapay Zeka düşünüyor..."):
+                try:
+                    if st.session_state.messages[-1]["role"] != "assistant":
+                        response = st.session_state.chat_session.send_message(user_input)
+                        ai_text = response.text
+                        st.session_state.messages.append({"role": "assistant", "content": ai_text})
+                        
+                        # [YENİ] Yapay zeka cevap verince, YENİ SORU İÇİN sayacı sıfırla
+                        st.session_state.question_start_time = time.time()
+                        
+                        with st.chat_message("assistant"):
+                            st.write(ai_text)
+                            audio_path = text_to_speech(ai_text)
+                            if audio_path: st.audio(audio_path, format="audio/mp3", autoplay=True)
+                except Exception as e: st.error(f"Hata: {e}")
 
 # --- Raporlama ---
 if st.session_state.finish_requested and st.session_state.chat_session:
-    with st.spinner("Analiz ediliyor..."):
+    with st.spinner("Mülakat bitti, analiz yapılıyor..."):
         max_retries = 3
         retry_count = 0
         success = False
@@ -333,7 +355,7 @@ if st.session_state.finish_requested and st.session_state.chat_session:
             try:
                 report_prompt = """
                 MÜLAKAT BİTTİ. Detaylı analiz yap.
-                🚨 KURAL: EĞER ADAY CEVAP VERMEDİYSE ("...", "bilmem") PUAN 0 OLSUN.
+                🚨 KURAL: EĞER ADAY CEVAP VERMEDİYSE VEYA SÜRE DOLDUYSA PUAN 0 OLSUN.
                 FORMAT:
                 SKOR: (0-100 arası sadece sayı)
                 KARAR: (Olumlu / Olumsuz)
