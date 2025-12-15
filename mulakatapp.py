@@ -8,6 +8,7 @@ import os
 import requests
 import tempfile
 import re
+from streamlit_mic_recorder import mic_recorder # YENİ EKLENDİ
 
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="AI Mülakat Simülasyonu", layout="wide")
@@ -34,11 +35,7 @@ def tr_to_en(text):
     for tr, en in tr_map.items(): text = text.replace(tr, en)
     return text
 
-def get_audio_recorder():
-    try:
-        from audio_recorder_streamlit import audio_recorder
-        return audio_recorder
-    except ImportError: return None
+# Eski get_audio_recorder fonksiyonunu kaldırdık, artık gerek yok.
 
 def speech_to_text(audio_bytes):
     try:
@@ -146,10 +143,8 @@ if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes
 if "fetched_models" not in st.session_state: st.session_state.fetched_models = []
 
 # --- Sidebar ---
-
 with st.sidebar:
     # LOGO EKLEME KISMI
-  
     try:
         st.image("logo2.jpg", width=250) 
     except:
@@ -293,19 +288,24 @@ if st.session_state.chat_session:
 
     col_mic, col_text = st.columns([1, 5])
     
-    audio_bytes = None
-    recorder = get_audio_recorder()
-    if recorder:
-        with col_mic:
-            audio_bytes = recorder(text="", recording_color="#e8b62c", neutral_color="#6aa36f", icon_name="microphone", icon_size="2x")
-    
+    # --- YENİ SES KAYIT ALANI (START / STOP) ---
     user_input = None
-    if audio_bytes and audio_bytes != st.session_state.last_audio_bytes:
-        if not st.session_state.finish_requested:
-            st.session_state.last_audio_bytes = audio_bytes
-            with st.spinner("Ses işleniyor..."):
-                user_input = speech_to_text(audio_bytes)
-                if user_input: st.info(f"🎤 {user_input}")
+    
+    with col_mic:
+        st.write("Cevabını Kaydet:")
+        # YENİ KÜTÜPHANE KULLANIMI: Start/Stop Butonları
+        audio = mic_recorder(
+            start_prompt="🎤 Başlat",
+            stop_prompt="⏹️ Durdur",
+            key='recorder',
+            just_once=True,
+            use_container_width=True
+        )
+    
+    if audio:
+        with st.spinner("Ses işleniyor..."):
+            user_input = speech_to_text(audio['bytes'])
+            if user_input: st.info(f"🎤 Algılanan: {user_input}")
 
     text_input = st.chat_input("Cevabın...")
     if text_input: user_input = text_input
@@ -414,4 +414,3 @@ if st.session_state.report_data:
             pdf_bytes = create_pdf_report(data)
             st.download_button(label="📄 Raporu İndir (PDF)", data=pdf_bytes, file_name="mulakat_karnesi.pdf", mime="application/pdf")
         except Exception as e: st.error(f"PDF Hatası: {e}")
-
