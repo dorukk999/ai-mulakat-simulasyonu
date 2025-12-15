@@ -146,8 +146,18 @@ if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes
 if "fetched_models" not in st.session_state: st.session_state.fetched_models = []
 
 # --- Sidebar ---
+
 with st.sidebar:
+    # LOGO EKLEME KISMI
+  
+    try:
+        st.image("logo2.jpg", width=250) 
+    except:
+        st.warning("Logo dosyası bulunamadı (logo2.jpg)")
+
     st.header("⚙️ Ayarlar")
+    
+    # API Key Girişi
     api_key_input = st.text_input("Google API Key", type="password")
     
     # --- GERÇEK ZAMANLI MODEL LİSTELEME ---
@@ -404,3 +414,4 @@ if st.session_state.report_data:
             pdf_bytes = create_pdf_report(data)
             st.download_button(label="📄 Raporu İndir (PDF)", data=pdf_bytes, file_name="mulakat_karnesi.pdf", mime="application/pdf")
         except Exception as e: st.error(f"PDF Hatası: {e}")
+
