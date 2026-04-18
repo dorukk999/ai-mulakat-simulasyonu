@@ -1,7 +1,3 @@
-AI-Powered Talent Assessment & Interview Simulator
-Bu kodlar, projenin sadece bir "ödev" değil, uçtan uca bir ürün (SaaS MVP) olduğunu kanıtlıyor. Upwork'te bu projeyi sunarken; Streamlit, Google Gemini API, Speech-to-Text ve Otomatik Raporlama entegrasyonlarını vurgulaman seni diğer adayların çok önüne geçirecektir.
-
-İşte Upwork portföyün için bu koda özel hazırlanmış açıklama:
 
 Project Title: AI-Powered Talent Assessment & Interview Simulator
 Project Overview
