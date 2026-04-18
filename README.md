@@ -1,1 +1,1 @@
-# ai-mulakat-simulasyonu
+AI-Powered Talent Assessment & Interview Simulator
